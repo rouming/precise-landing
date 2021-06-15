@@ -19,7 +19,7 @@ B = np.array([0.54,0.00,0.00]) # 262d
 C = np.array([0.00,0.54,0.00]) # 260f
 D = np.array([0.00,0.00,0.00]) # 2852
 
-file1 = open('../data/field-session-1/log.6', 'r')
+file1 = open('data/field-session-1/log.6', 'r')
 count = 0
 
 X = []
