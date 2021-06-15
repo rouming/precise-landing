@@ -1,0 +1,11 @@
+[Unit]
+Description=DWM1001 Server
+
+[Service]
+Type=simple
+User=root
+Restart=always
+ExecStart=/usr/bin/dwm1001-server
+
+[Install]
+WantedBy=multi-user.target

@@ -14,18 +14,73 @@
  *
  */
 
+#include <errno.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <string.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/time.h>
+
 #include "dwm_api.h"
 #include "hal.h"
 #include "hal_log.h"
 #include "hal_gpio.h"
 #include "test_util.h"
-#include <sys/time.h>
 
 struct timeval tv;
 uint64_t ts_curr = 0;
 uint64_t ts_last = 0;
-volatile uint8_t data_ready;
+
+#define UDP_GROUP "224.1.1.1"
+#define UDP_PORT  5555
+
+#define UPD_RATE    1 /* in 100ms */
+#define UPD_RATE_MS (UPD_RATE * 100)
+
+//#define LOG
+//#define DEV_CONFIG
+//#define DEV_FACTORY_RESET
+//#define DEV_SETUP_ENC
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic warning "-Wpadded"
+
+struct pos {
+	int32_t x;
+	int32_t y;
+	int32_t z;
+	uint16_t qf;
+	uint16_t valid;
+};
+
+struct dist {
+	uint32_t dist;
+	uint16_t addr;
+	uint16_t qf;
+};
+
+struct anchor {
+	struct pos  pos;
+	struct dist dist;
+};
+
+struct ts {
+	uint32_t sec;
+	uint32_t usec;
+};
+
+struct location {
+	struct pos     calc_pos;
+	struct ts      ts;
+	uint32_t       nr_anchors;
+	struct anchor  anchors[];
+};
+
+#pragma GCC diagnostic pop
 
 static int frst(void)
 {
@@ -48,43 +103,89 @@ static int frst(void)
 	return err_cnt;
 }
 
-static int get_loc(void)
+static int get_loc(struct location *loc)
 {
 	// ========== dwm_loc_get ==========
 	int rv, err_cnt = 0, i;
 
-	dwm_loc_data_t loc;
-	dwm_pos_t pos;
-	loc.p_pos = &pos;
-	HAL_Log("dwm_loc_get(&loc)\n");
-	rv = Test_CheckTxRx(dwm_loc_get(&loc));
+	dwm_loc_data_t dwm_loc;
+	dwm_pos_t dwm_pos;
+
+	dwm_loc.p_pos = &dwm_pos;
+	HAL_Log("dwm_loc_get(&dwm_loc)\n");
+	rv = Test_CheckTxRx(dwm_loc_get(&dwm_loc));
 
 	gettimeofday(&tv,NULL);
 
-	if (rv == RV_OK) {
-		HAL_Log("ts:%ld.%06ld [%d,%d,%d,%u]\n", tv.tv_sec, tv.tv_usec, loc.p_pos->x, loc.p_pos->y, loc.p_pos->z, loc.p_pos->qf);
-		printf("ts:%ld.%06ld [%d,%d,%d,%u]", tv.tv_sec, tv.tv_usec, loc.p_pos->x, loc.p_pos->y, loc.p_pos->z, loc.p_pos->qf);
+	memset(loc, 0, sizeof(*loc));
 
-		for (i = 0; i < loc.anchors.dist.cnt; ++i) {
+	if (rv == RV_OK) {
+		HAL_Log("ts:%ld.%06ld [%d,%d,%d,%u]\n",
+			tv.tv_sec, tv.tv_usec, dwm_loc.p_pos->x,
+			dwm_loc.p_pos->y, dwm_loc.p_pos->z, dwm_loc.p_pos->qf);
+#ifdef LOG
+		 printf("ts:%ld.%06ld [%d,%d,%d,%u]",
+		        tv.tv_sec, tv.tv_usec, dwm_loc.p_pos->x, dwm_loc.p_pos->y,
+			dwm_loc.p_pos->z, dwm_loc.p_pos->qf);
+#endif
+
+		*loc = (struct location) {
+			.calc_pos = {
+				.x     = dwm_loc.p_pos->x,
+				.y     = dwm_loc.p_pos->y,
+				.z     = dwm_loc.p_pos->z,
+				.qf    = dwm_loc.p_pos->qf,
+				.valid = 1,
+			},
+			.ts = {
+				.sec  = tv.tv_sec,
+				.usec = tv.tv_usec,
+			},
+			.nr_anchors = dwm_loc.anchors.dist.cnt,
+		};
+
+		for (i = 0; i < dwm_loc.anchors.dist.cnt; ++i) {
+			struct anchor *an = &loc->anchors[i];
+
 			HAL_Log("#%u)", i);
+			HAL_Log("a:0x%08x", dwm_loc.anchors.dist.addr[i]);
+#ifdef LOG
 			printf("#%u)", i);
-			HAL_Log("a:0x%08x", loc.anchors.dist.addr[i]);
-			printf("a:0x%08x", loc.anchors.dist.addr[i]);
-			if (i < loc.anchors.an_pos.cnt) {
-				HAL_Log("[%d,%d,%d,%u]", loc.anchors.an_pos.pos[i].x,
-					loc.anchors.an_pos.pos[i].y,
-					loc.anchors.an_pos.pos[i].z,
-					loc.anchors.an_pos.pos[i].qf);
-				printf("[%d,%d,%d,%u]", loc.anchors.an_pos.pos[i].x,
-				       loc.anchors.an_pos.pos[i].y,
-				       loc.anchors.an_pos.pos[i].z,
-				       loc.anchors.an_pos.pos[i].qf);
+			printf("a:0x%08x", dwm_loc.anchors.dist.addr[i]);
+#endif
+
+			memset(an, 0, sizeof(*an));
+			an->dist.dist = dwm_loc.anchors.dist.dist[i];
+			an->dist.addr = dwm_loc.anchors.dist.addr[i];
+			an->dist.qf   = dwm_loc.anchors.dist.qf[i];
+
+			if (i < dwm_loc.anchors.an_pos.cnt) {
+				an->pos.x  = dwm_loc.anchors.an_pos.pos[i].x;
+				an->pos.y  = dwm_loc.anchors.an_pos.pos[i].y;
+				an->pos.z  = dwm_loc.anchors.an_pos.pos[i].z;
+				an->pos.qf = dwm_loc.anchors.an_pos.pos[i].qf;
+				an->pos.valid = 1;
+
+				HAL_Log("[%d,%d,%d,%u]", dwm_loc.anchors.an_pos.pos[i].x,
+					dwm_loc.anchors.an_pos.pos[i].y,
+					dwm_loc.anchors.an_pos.pos[i].z,
+					dwm_loc.anchors.an_pos.pos[i].qf);
+#ifdef LOG
+				printf("[%d,%d,%d,%u]", dwm_loc.anchors.an_pos.pos[i].x,
+				       dwm_loc.anchors.an_pos.pos[i].y,
+				       dwm_loc.anchors.an_pos.pos[i].z,
+				       dwm_loc.anchors.an_pos.pos[i].qf);
+#endif
 			}
-			HAL_Log("d=%u,qf=%u\n", loc.anchors.dist.dist[i], loc.anchors.dist.qf[i]);
-			printf("d=%u,qf=%u", loc.anchors.dist.dist[i], loc.anchors.dist.qf[i]);
+			HAL_Log("d=%u,qf=%u\n", dwm_loc.anchors.dist.dist[i], dwm_loc.anchors.dist.qf[i]);
+#ifdef LOG
+			printf("d=%u,qf=%u", dwm_loc.anchors.dist.dist[i], dwm_loc.anchors.dist.qf[i]);
+#endif
 		}
 		HAL_Log("\n");
+#ifdef LOG
 		printf("\n");
+#endif
 	}
 	fflush(stdout);
 	err_cnt += rv;
@@ -100,6 +201,8 @@ static int setup_tag(void)
 
 	dwm_cfg_tag_t cfg_tag;
 	dwm_cfg_t cfg;
+
+	memset(&cfg_tag, 0, sizeof(cfg_tag));
 	cfg_tag.stnry_en = 1; // XXX accel
 	cfg_tag.low_power_en = 0;
 	cfg_tag.meas_mode = DWM_MEAS_MODE_TWR; //XXX
@@ -110,18 +213,29 @@ static int setup_tag(void)
 	cfg_tag.common.uwb_mode = DWM_UWB_MODE_ACTIVE;
 	cfg_tag.common.fw_update_en = 0;
 
-	HAL_Log("dwm_cfg_get(&cfg)\n");
-	err_cnt += Test_CheckTxRx(dwm_cfg_get(&cfg));
+#if DEV_FACTORY_RESET
+	/* Factory reset */
+	err_cnt = frst();
+	if (err_cnt)
+		return err_cnt;
+#endif
 
-	while((cfg_tag.low_power_en!= cfg.low_power_en)
-	      || (cfg_tag.meas_mode      != cfg.meas_mode)
-	      || (cfg_tag.loc_engine_en  != cfg.loc_engine_en)
-	      || (cfg_tag.stnry_en       != cfg.stnry_en)
-	      || (cfg_tag.common.enc_en  != cfg.common.enc_en)
-	      || (cfg_tag.common.led_en  != cfg.common.led_en)
-	      || (cfg_tag.common.ble_en  != cfg.common.ble_en)
-	      || (cfg_tag.common.uwb_mode != cfg.common.uwb_mode)
-	      || (cfg_tag.common.fw_update_en != cfg.common.fw_update_en)) {
+	HAL_Log("dwm_cfg_get(&cfg)\n");
+	err_cnt = Test_CheckTxRx(dwm_cfg_get(&cfg));
+	if (err_cnt)
+		return err_cnt;
+
+	rv = 0;
+	while(rv
+	      || cfg_tag.low_power_en   != cfg.low_power_en
+	      || cfg_tag.meas_mode      != cfg.meas_mode
+	      || cfg_tag.loc_engine_en  != cfg.loc_engine_en
+	      || cfg_tag.stnry_en       != cfg.stnry_en
+	      || cfg_tag.common.enc_en  != cfg.common.enc_en
+	      || cfg_tag.common.led_en  != cfg.common.led_en
+	      || cfg_tag.common.ble_en  != cfg.common.ble_en
+	      || cfg_tag.common.uwb_mode != cfg.common.uwb_mode
+	      || cfg_tag.common.fw_update_en != cfg.common.fw_update_en) {
 		printf("Comparing set vs. get.\n");
 		if (cfg.mode != DWM_MODE_TAG)
 			printf("mode: get = %d, set = %d\n",
@@ -151,19 +265,22 @@ static int setup_tag(void)
 			printf("led : get = %d, set = %d\n",
 			       cfg.common.led_en, cfg_tag.common.led_en);
 
-		HAL_Log("dwm_cfg_tag_set(&cfg_tag)\n");
+		printf("dwm_cfg_tag_set(&cfg_tag)\n");
 		rv = Test_CheckTxRx(dwm_cfg_tag_set(&cfg_tag));
-		err_cnt += rv;
+		if (rv)
+			continue;
+		HAL_Delay(delay_ms);
 
-		HAL_Log("dwm_reset()\n");
+		printf("dwm_reset()\n");
 		rv = Test_CheckTxRx(dwm_reset());
+		if (rv)
+			continue;
 		HAL_Log("Wait %d ms for node to reset.\n", delay_ms);
 		err_cnt += rv;
 		HAL_Delay(delay_ms);
 
-		HAL_Log("dwm_cfg_get(&cfg)\n");
+		printf("dwm_cfg_get(&cfg)\n");
 		rv = Test_CheckTxRx(dwm_cfg_get(&cfg));
-		err_cnt += rv;
 	}
 	HAL_Log("Done.\n");
 
@@ -206,11 +323,23 @@ static int setup_enc(void)
 	return err_cnt;
 }
 
-__attribute__((unused))
-static void gpio_cb(void)
+static int setup_sock(struct sockaddr_in *addr)
 {
-	printf(">> data ready\n");
-	data_ready = 1;
+	int rc, sockfd;
+
+	sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sockfd < 0) {
+		rc = -errno;
+		perror("socket creation failed");
+		return rc;
+	}
+
+	memset(addr, 0, sizeof(*addr));
+	addr->sin_family = AF_INET;
+	addr->sin_addr.s_addr = inet_addr(UDP_GROUP);
+	addr->sin_port = htons(UDP_PORT);
+
+	return sockfd;
 }
 
 static void do_data_loop(void)
@@ -219,51 +348,70 @@ static void do_data_loop(void)
 	uint16_t panid;
 	uint16_t ur_set;
 	uint16_t ur_s_set;
+	int sockfd, n;
+
+	struct sockaddr_in addr;
+	struct location *loc = alloca(1024);
+
+	sockfd = setup_sock(&addr);
+	if (sockfd < 0)
+		return;
 
 	//init
 	printf("Initializing...\n");
 	HAL_Log("Initializing...\n");
+
 	dwm_init();
-	err_cnt += frst();
-	HAL_Log("Done\n");
 
-	/* ========= published APIs =========*/
-
+#ifdef DEV_CONFIG
 	// setup tag mode configurations
-	setup_tag();
+	while (setup_tag())
+		;
 
-	// setup tag update rate
-	ur_s_set = ur_set = 1;
-	HAL_Log("dwm_upd_rate_set(ur_set, ur_s_set);\n");
-	dwm_upd_rate_set(ur_set, ur_s_set);
+#if DEV_SETUP_ENC
+	// setup encryption key for network
+	while (setup_enc())
+		;
+#endif
 
 	// setup PANID
+	printf(">> set panid\n");
 	panid = 0xbeb2;
-	HAL_Log("dwm_panid_set(panid);\n");
-	dwm_panid_set(panid);
+	while (dwm_panid_set(panid) != RV_OK)
+		printf("panid_set failed\n");
 
-#if 0
-	// setup GPIO interrupt from "LOC_READY" event
-	HAL_Log("dwm_int_cfg_set(DWM1001_INTR_LOC_READY);\n");
-	dwm_int_cfg_set(DWM1001_INTR_LOC_READY);
-	HAL_GPIO_SetupCb(HAL_GPIO_DRDY, HAL_GPIO_INT_EDGE_RISING, &gpio_cb);
+	// setup tag update rate
+	printf(">> set rate\n");
+	ur_s_set = ur_set = UPD_RATE;
+	HAL_Log("dwm_upd_rate_set(ur_set, ur_s_set);\n");
+	while (dwm_upd_rate_set(ur_set, ur_s_set) != RV_OK)
+		;
 #endif
 
-#if 0
-	// setup encryption key for network
-	setup_enc();
-#endif
+//	HAL_Log("dwm_int_cfg_set(DWM1001_INTR_LOC_READY);\n");
+//	uint16_t intr;
+//	dwm_int_cfg_set(DWM1001_INTR_LOC_READY);
+//	HAL_GPIO_SetupCb(HAL_GPIO_DRDY, HAL_GPIO_INT_EDGE_RISING, &gpio_cb);
+
+
+
+	printf("Ready for fetching the data\n");
 
 	while (1) {
-#if 0
-		if (data_ready == 1) {
-#endif
-			data_ready = 0;
-			get_loc();
-#if 0
+		size_t sz;
+
+		err_cnt = get_loc(loc);
+		if (!err_cnt) {
+			sz = sizeof(*loc) + sizeof(loc->anchors[0]) * loc->nr_anchors;
+			n = sendto(sockfd, loc, sz, MSG_CONFIRM,
+				   (const struct sockaddr *)&addr, sizeof(addr));
+			if (n < 0)
+				printf("sendto failed: %d\n", errno);
+		} else {
+			printf(">> get loc failed\n");
 		}
-#endif
-		HAL_Delay(200);
+
+		HAL_Delay(UPD_RATE_MS);
 	}
 
 	HAL_Log("err_cnt = %d \n", err_cnt);
