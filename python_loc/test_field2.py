@@ -90,16 +90,16 @@ def calc_pos(X0, la, lb, lc, ld):
     upb = [math.inf, math.inf, math.inf]
 
 
-    # res = least_squares(func1, X0, loss='cauchy', f_scale=0.001, bounds=(lowb, upb),
-    #                     args=(la, lb, lc, ld), verbose=1)
+    res = least_squares(func1, X0, loss='cauchy', f_scale=0.001, bounds=(lowb, upb),
+                        args=(la, lb, lc, ld), verbose=1)
     ##also decent and fast
     # res = minimize(func1, X0, method="L-BFGS-B", bounds=[(-math.inf, math.inf), (-math.inf, math.inf), (0, math.inf)],
     #                #options={'ftol': 1e-4, 'disp': True}, args=(la, lb, lc, ld))
     #                options={'ftol': 1e-4,'eps' : 1e-4, 'disp': True}, args=(la, lb, lc, ld))
 
-    res = minimize(func1, X0, method="SLSQP", bounds=[(-math.inf, math.inf), (-math.inf, math.inf), (0, math.inf)],
-              #options={ 'ftol': 1e-5, 'disp': True}, args=(la, lb, lc, ld))
-              options={'ftol': 1e-5,'eps' : 1e-4, 'disp': True}, args=(la, lb, lc, ld))
+    # res = minimize(func1, X0, method="SLSQP", bounds=[(-math.inf, math.inf), (-math.inf, math.inf), (0, math.inf)],
+    #           #options={ 'ftol': 1e-5, 'disp': True}, args=(la, lb, lc, ld))
+    #           options={'ftol': 1e-5,'eps' : 1e-4, 'disp': True}, args=(la, lb, lc, ld))
 
     # experiments
     #res = minimize(func1, X0, method='BFGS', options={'xatol': 1e-8, 'disp': True}, args=(la, lb, lc, ld))
@@ -194,9 +194,7 @@ while True:
         ax.set_ylim3d(-8, 8)
         ax.set_zlim3d(0, 10)
 
-        plt.pause(0.05)
-
-
+        plt.pause(0.01)
 
 print("total pos norm: ", total_pos, " total calc norm: ", total_calc)
 
