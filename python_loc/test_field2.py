@@ -1,4 +1,6 @@
 import math
+import socket
+import struct
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
@@ -13,14 +15,14 @@ from scipy.signal import savgol_filter
 
 import time
 
-anchors_id = ["a:0x00002585", "a:0x0000262d", "a:0x0000260f", "a:0x00002852"]
+MCAST_GRP = '224.1.1.1'
+MCAST_PORT = 5555
+sock  = None
+
 A = np.array([0.54,0.54,0.00]) # 2585
 B = np.array([0.54,0.00,0.00]) # 262d
 C = np.array([0.00,0.54,0.00]) # 260f
 D = np.array([0.00,0.00,0.00]) # 2852
-
-file1 = open('data/field-session-1/log.6', 'r')
-count = 0
 
 X = []
 Y = []
@@ -29,6 +31,87 @@ Z = []
 X_lse = []
 Y_lse = []
 Z_lse = []
+
+def create_sock():
+    # Create sock and bind
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind((MCAST_GRP, MCAST_PORT))
+
+    # Join group
+    mreq = struct.pack("4sl", socket.inet_aton(MCAST_GRP), socket.INADDR_ANY)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+
+    return sock
+
+def receive_location_from_sock(sock):
+    buf = sock.recv(512)
+
+    # Location header
+    fmt = "iiihhiii"
+    (x, y, z, pos_qf, pos_valid, ts_sec, ts_usec, nr_anchors) = struct.unpack_from(fmt, buf, 0)
+
+    # Skip location header
+    off = struct.calcsize(fmt)
+
+    print("ts:%ld.%06ld [%d,%d,%d,%u] " % (ts_sec, ts_usec, x, y, z, pos_qf), end='')
+
+    location = {
+        'calc_pos': {
+            'x':  float(x),
+            'y':  float(y),
+            'z':  float(z),
+            'qf': pos_qf,
+            'valid': pos_valid,
+        },
+        'ts': {
+            'sec':  ts_sec,
+            'usec': ts_usec,
+        },
+        'anchors': [],
+    }
+
+    # For each anchor
+    fmt = "iiihhihh"
+    for i in range(0, nr_anchors):
+        (x, y, z, pos_qf, pos_valid, dist, addr, dist_qf) = struct.unpack_from(fmt, buf, off)
+        off += struct.calcsize(fmt)
+
+        print("#%u) a:0x%08x [%d,%d,%d,%u] d=%u,qf=%u " % (i, addr, x, y, z, pos_qf, dist, dist_qf), \
+              end='')
+
+        anchor = {
+            'pos': {
+                'x':  float(x),
+                'y':  float(y),
+                'z':  float(z),
+                'qf': pos_qf,
+                'valid': pos_valid,
+            },
+            'dist': {
+                'dist': float(dist),
+                'addr': addr,
+                'qf': dist_qf
+            },
+        }
+
+        location['anchors'].append(anchor)
+
+    return location
+
+def get_location():
+    global sock
+    if sock is None:
+        sock = create_sock()
+
+    return receive_location_from_sock(sock)
+
+def find_anchor_by_addr(location, addr):
+    for anchor in location['anchors']:
+        if anchor['dist']['addr'] == addr:
+            return anchor
+
+    return None
 
 def func1(X, la, lb, lc, ld):
     ret = (np.linalg.norm(X - A) - la) ** 2 + (np.linalg.norm(X - B) - lb) ** 2 + \
@@ -107,13 +190,6 @@ def calc_pos(X0, la, lb, lc, ld):
     #res = minimize(func1, X0, method='BFGS', options={'disp': True}, args=(la, lb, lc, ld))
     return res.x
 
-def get_dist(line, id):
-    l = line.split(id+"[")[1]
-    l = l.split("d=")[1]
-    val = l.split(",")[0]
-
-    return float(val)
-
 total_pos = 0
 total_calc = 0
 
@@ -126,41 +202,32 @@ ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
 
 while True:
     ax.cla()
-    count += 1
 
-    line = file1.readline()
-    if not line:
-        break
+    print(">> get location from 4 anchors")
 
-    if anchors_id[0] not in line:
-        continue
-    if anchors_id[1] not in line:
-        continue
-    if anchors_id[2] not in line:
-        continue
-    if anchors_id[3] not in line:
+    loc = get_location()
+    if len(loc['anchors']) != 4:
         continue
 
-    r = line.split(" [")[1]
-    r = r.split("]#")[0]
+    print(">> got calculated position from the engine")
 
-    vals = r.split(',')
-    x = float(vals[0])/1000
-    y = float(vals[1])/1000
-    z = float(vals[2])/1000
+    x = loc['calc_pos']['x']/1000
+    y = loc['calc_pos']['y']/1000
+    z = loc['calc_pos']['z']/1000
     X.append(x)
     Y.append(y)
     Z.append(z)
 
-    la = get_dist(line, 'a:0x00002585') /1000
-    lb = get_dist(line, 'a:0x0000262d') /1000
-    lc = get_dist(line, 'a:0x0000260f') /1000
-    ld = get_dist(line, 'a:0x00002852') /1000
+    print(">> get distances")
+
+    la = find_anchor_by_addr(loc, 0x2585)['dist']['dist'] /1000
+    lb = find_anchor_by_addr(loc, 0x262d)['dist']['dist'] /1000
+    lc = find_anchor_by_addr(loc, 0x260f)['dist']['dist'] /1000
+    ld = find_anchor_by_addr(loc, 0x28b9)['dist']['dist'] /1000
 
     if not assigned:
         X0 = np.abs(np.array([x, y, z]))
         assigned = True
-
 
     X_calc = calc_pos(X0, la, lb, lc, ld)
     #X_calc = calc_pos([0, 0, 0], la, lb, lc, ld)
