@@ -232,7 +232,9 @@ def calc_pos(X0, la, lb, lc, ld):
 
 
     res = least_squares(func1, X0, loss='cauchy', f_scale=0.001, bounds=(lowb, upb),
-                        args=(la, lb, lc, ld), verbose=1)
+                        #args=(la, lb, lc, ld), verbose=1)
+                        args=(la, lb, lc, ld), verbose=0)
+
     ##also decent and fast
     # res = minimize(func1, X0, method="L-BFGS-B", bounds=[(-math.inf, math.inf), (-math.inf, math.inf), (0, math.inf)],
     #                #options={'ftol': 1e-4, 'disp': True}, args=(la, lb, lc, ld))
@@ -311,10 +313,10 @@ while True:
     Y_lse.append(X_calc[1])
     Z_lse.append(X_calc[2])
 
-    if len(X_lse) > 21:
-        X_filtered = savgol_filter(X_lse, 21, 5)
-        Y_filtered = savgol_filter(Y_lse, 21, 5)
-        Z_filtered = savgol_filter(Z_lse, 21, 5)
+    if len(X_lse) > 11:
+        X_filtered = savgol_filter(X_lse, 11, 5)
+        Y_filtered = savgol_filter(Y_lse, 11, 5)
+        Z_filtered = savgol_filter(Z_lse, 11, 5)
 
 
         plt.plot(X_filtered, Y_filtered, Z_filtered, color='g')
