@@ -1,6 +1,7 @@
 import math
 import socket
 import struct
+import select
 
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
@@ -15,9 +16,17 @@ from scipy.signal import savgol_filter
 
 import time
 
+PARROT_IP = "127.0.0.1"
+PARROT_PORT = 5556
+
 MCAST_GRP = '224.1.1.1'
 MCAST_PORT = 5555
-sock  = None
+
+dwm_sock    = None
+parrot_sock = None
+
+dwm_loc     = None
+parrot_data = None
 
 A = np.array([0.54,0.54,0.00]) # 2585
 B = np.array([0.54,0.00,0.00]) # 262d
@@ -32,7 +41,7 @@ X_lse = []
 Y_lse = []
 Z_lse = []
 
-def create_sock():
+def create_dwm_sock():
     # Create sock and bind
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -41,10 +50,19 @@ def create_sock():
     # Join group
     mreq = struct.pack("4sl", socket.inet_aton(MCAST_GRP), socket.INADDR_ANY)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+    sock.setblocking(0)
 
     return sock
 
-def receive_location_from_sock(sock):
+def create_parrot_sock():
+    # Create parrot sock
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind((PARROT_IP, PARROT_PORT))
+    sock.setblocking(0)
+
+    return sock
+
+def receive_dwm_location_from_sock(sock):
     buf = sock.recv(512)
 
     # Location header
@@ -97,14 +115,54 @@ def receive_location_from_sock(sock):
 
         location['anchors'].append(anchor)
 
+    print('')
+
     return location
 
-def get_location():
-    global sock
-    if sock is None:
-        sock = create_sock()
+def receive_parrot_data_from_sock(sock):
+    buf = sock.recv(512)
+    alt, roll, pitch, yaw = struct.unpack("ffff", buf)
 
-    return receive_location_from_sock(sock)
+    parrot_data = {
+        'alt':   alt,
+        'roll':  roll,
+        'pitch': pitch,
+        'yaw':   yaw
+    }
+
+    return parrot_data
+
+def get_dwm_location_or_parrot_data():
+    global dwm_sock, parrot_sock, dwm_loc, parrot_data
+
+    if dwm_sock is None:
+        dwm_sock = create_dwm_sock()
+    if parrot_sock is None:
+        parrot_sock = create_parrot_sock()
+
+    timeout = 0
+    received = False
+
+    # Suck everything from the socket, we need really up-to-date data
+    while (True):
+        rd, wr, ex = select.select([dwm_sock, parrot_sock], [], [], timeout)
+        if 0 == len(rd):
+            if received:
+                break
+            else:
+                # Wait for data
+                timeout = None
+                continue
+
+        received = True
+        timeout = 0
+
+        if dwm_sock in rd:
+            dwm_loc = receive_dwm_location_from_sock(dwm_sock)
+        if parrot_sock in rd:
+            parrot_data = receive_parrot_data_from_sock(parrot_sock)
+
+    return dwm_loc, parrot_data
 
 def find_anchor_by_addr(location, addr):
     for anchor in location['anchors']:
@@ -205,9 +263,14 @@ while True:
 
     print(">> get location from 4 anchors")
 
-    loc = get_location()
-    if len(loc['anchors']) != 4:
+    loc, parrot_data = get_dwm_location_or_parrot_data()
+    if loc is None or len(loc['anchors']) != 4:
         continue
+
+    if parrot_data is not None:
+        print("## get parrot data: alt %f roll %f pitch %f yaw %f" % \
+            (parrot_data['alt'], parrot_data['roll'], \
+               parrot_data['pitch'], parrot_data['yaw']))
 
     print(">> got calculated position from the engine")
 
