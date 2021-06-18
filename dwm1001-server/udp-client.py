@@ -28,19 +28,23 @@ while True:
     readable, writable, exceptional = select.select([dwm_sock, parrot_sock], \
                                                     [], [])
     if dwm_sock in readable:
-        buf = dwm_sock.recv(512)
-
         # Location header
         fmt = "iiihhiii"
-        (x, y, z, pos_qf, pos_valid, ts_sec, ts_usec, nr_anchors) = struct.unpack_from(fmt, buf, 0)
+        sz = struct.calcsize(fmt)
+        buf = dwm_sock.recv(sz, socket.MSG_PEEK)
 
-        # Skip location header
-        off = struct.calcsize(fmt)
+        (x, y, z, pos_qf, pos_valid, ts_sec, ts_usec, nr_anchors) = struct.unpack(fmt, buf)
 
         print("ts:%ld.%06ld [%d,%d,%d,%u] " % (ts_sec, ts_usec, x, y, z, pos_qf), end='')
 
-        # For each anchor
+        # Skip size of the location header
+        off = sz
+
+        # Read the whole location packet
         fmt = "iiihhihh"
+        sz = sz + struct.calcsize(fmt) * nr_anchors
+        buf = sock.recv(sz)
+
         for i in range(0, nr_anchors):
             (x, y, z, pos_qf, pos_valid, dist, addr, dist_qf) = struct.unpack_from(fmt, buf, off)
             off += struct.calcsize(fmt)
@@ -51,7 +55,9 @@ while True:
         print()
 
     elif parrot_sock in readable:
-        buf = parrot_sock.recv(512)
+        fmt = "iiffff"
+        sz = struct.calcsize(fmt)
+        buf = parrot_sock.recv(sz)
 
-        sec, usec, alt, roll, pitch, yaw = struct.unpack("iiffff", buf)
+        sec, usec, alt, roll, pitch, yaw = struct.unpack(fmt, buf)
         print("ts:%ld.%06ld alt %f roll %f pitch %f yaw %f" % (sec, usec, alt, roll, pitch, yaw))

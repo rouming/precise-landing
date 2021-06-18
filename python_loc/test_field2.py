@@ -63,14 +63,13 @@ def create_parrot_sock():
     return sock
 
 def receive_dwm_location_from_sock(sock):
-    buf = sock.recv(512)
-
     # Location header
     fmt = "iiihhiii"
-    (x, y, z, pos_qf, pos_valid, ts_sec, ts_usec, nr_anchors) = struct.unpack_from(fmt, buf, 0)
+    sz = struct.calcsize(fmt)
+    buf = sock.recv(sz, socket.MSG_PEEK)
 
-    # Skip location header
-    off = struct.calcsize(fmt)
+    # Unpack location header
+    (x, y, z, pos_qf, pos_valid, ts_sec, ts_usec, nr_anchors) = struct.unpack(fmt, buf)
 
     print("ts:%ld.%06ld [%d,%d,%d,%u] " % (ts_sec, ts_usec, x, y, z, pos_qf), end='')
 
@@ -89,8 +88,15 @@ def receive_dwm_location_from_sock(sock):
         'anchors': [],
     }
 
-    # For each anchor
+    # Skip size of the location header
+    off = sz
+
+    # Read the whole location packet
     fmt = "iiihhihh"
+    sz = sz + struct.calcsize(fmt) * nr_anchors
+    buf = sock.recv(sz)
+
+    # For each anchor
     for i in range(0, nr_anchors):
         (x, y, z, pos_qf, pos_valid, dist, addr, dist_qf) = struct.unpack_from(fmt, buf, off)
         off += struct.calcsize(fmt)
@@ -120,8 +126,10 @@ def receive_dwm_location_from_sock(sock):
     return location
 
 def receive_parrot_data_from_sock(sock):
-    buf = sock.recv(512)
-    sec, usec, alt, roll, pitch, yaw = struct.unpack("iiffff", buf)
+    fmt = "iiffff"
+    sz = struct.calcsize(fmt)
+    buf = sock.recv(sz)
+    sec, usec, alt, roll, pitch, yaw = struct.unpack(fmt, buf)
 
     parrot_data = {
         'ts': {
