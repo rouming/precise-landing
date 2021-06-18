@@ -1,3 +1,4 @@
+import time
 import socket
 import struct
 
@@ -23,6 +24,15 @@ roll  = 0.0
 pitch = 0.0
 yaw   = 0.0
 
+def send_parrot_data(sock, alt, roll, pitch, yaw):
+    ns = time.time_ns()
+    usec = ns / 1000
+    sec = usec / 1000000
+    usec %= 1000000
+
+    buf = struct.pack("iiffff", sec, usec, alt, roll, pitch, yaw)
+    sock.sendto(buf, (UDP_IP, UDP_PORT))
+
 class FlightListener(olympe.EventListener):
 
     @olympe.listen_event(FlyingStateChanged() | AlertStateChanged() | NavigateHomeStateChanged())
@@ -38,9 +48,8 @@ class FlightListener(olympe.EventListener):
         global sock, alt, roll, pitch, yaw
 
         alt  = event.args['altitude']
-        buf = struct.pack("ffff", alt, roll, pitch, yaw)
-        sock.sendto(buf, (UDP_IP, UDP_PORT))
-#        print("altitude = {altitude}".format(**event.args))
+
+        send_parrot_data(sock, alt, roll, pitch, yaw)
 
     @olympe.listen_event(AttitudeChanged())
     def onAttitudeChanged(self, event, scheduler):
@@ -50,9 +59,7 @@ class FlightListener(olympe.EventListener):
         pitch = event.args['pitch']
         yaw   = event.args['yaw']
 
-        buf = struct.pack("ffff", alt, roll, pitch, yaw)
-        sock.sendto(buf, (UDP_IP, UDP_PORT))
-#        print("roll = {roll} pitch = {pitch} yaw = {yaw}".format(**event.args))
+        send_parrot_data(sock, alt, roll, pitch, yaw)
 
 # Create UDP sock
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)

@@ -53,5 +53,5 @@ while True:
     elif parrot_sock in readable:
         buf = parrot_sock.recv(512)
 
-        alt, roll, pitch, yaw = struct.unpack("ffff", buf)
-        print("alt %f roll %f pitch %f yaw %f" % (alt, roll, pitch, yaw))
+        sec, usec, alt, roll, pitch, yaw = struct.unpack("iiffff", buf)
+        print("ts:%ld.%06ld alt %f roll %f pitch %f yaw %f" % (sec, usec, alt, roll, pitch, yaw))

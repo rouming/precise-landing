@@ -121,9 +121,13 @@ def receive_dwm_location_from_sock(sock):
 
 def receive_parrot_data_from_sock(sock):
     buf = sock.recv(512)
-    alt, roll, pitch, yaw = struct.unpack("ffff", buf)
+    sec, usec, alt, roll, pitch, yaw = struct.unpack("iiffff", buf)
 
     parrot_data = {
+        'ts': {
+            'sec':  sec,
+            'usec': usec,
+        },
         'alt':   alt,
         'roll':  roll,
         'pitch': pitch,
