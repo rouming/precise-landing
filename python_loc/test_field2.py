@@ -357,6 +357,7 @@ while True:
         ax.set_ylim3d(-8, 8)
         ax.set_zlim3d(0, 10)
 
-        plt.pause(0.01)
+        plt.pause(0.000001)
+
 
     print("total pos norm: ", total_pos, " total calc norm: ", total_calc)
