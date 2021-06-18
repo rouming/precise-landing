@@ -317,11 +317,17 @@ while True:
     Y_lse.append(X_calc[1])
     Z_lse.append(X_calc[2])
 
+    # Keep only last N
+    N_last_coords = 50
+    if N_last_coords > 0:
+        X_lse = X_lse[-N_last_coords:]
+        Y_lse = Y_lse[-N_last_coords:]
+        Z_lse = Z_lse[-N_last_coords:]
+
     if len(X_lse) > 11:
         X_filtered = savgol_filter(X_lse, 11, 5)
         Y_filtered = savgol_filter(Y_lse, 11, 5)
         Z_filtered = savgol_filter(Z_lse, 11, 5)
-
 
         plt.plot(X_filtered, Y_filtered, Z_filtered, color='g')
         ax.scatter(X_filtered, Y_filtered, Z_filtered, color='r', s=0.8)
