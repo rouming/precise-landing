@@ -19,7 +19,7 @@ def get_dist(line, id):
 
     return int(val)
 
-file1 = open('data/field-session-1/log.6', 'r')
+file1 = open('data/field-session-1/log.4', 'r')
 
 
 MCAST_GRP = '224.1.1.1'

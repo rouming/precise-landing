@@ -9,6 +9,8 @@ import numpy as np
 from scipy.optimize import least_squares
 from scipy.optimize import minimize
 
+import collections
+
 
 from scipy.signal.signaltools import wiener
 from scipy.signal import savgol_filter
@@ -33,13 +35,31 @@ B = np.array([0.54,0.00,0.00]) # 262d
 C = np.array([0.00,0.54,0.00]) # 260f
 D = np.array([0.00,0.00,0.00]) # 2852
 
-X = []
-Y = []
-Z = []
+# X = []
+# Y = []
+# Z = []
 
-X_lse = []
-Y_lse = []
-Z_lse = []
+
+X_lse = collections.deque()
+Y_lse = collections.deque()
+Z_lse = collections.deque()
+T = collections.deque()
+
+hist_len_sec = 10
+
+total_pos = 0
+total_calc = 0
+
+rects = [[A, B, D, C]]
+fig1 = plt.figure()
+ax = fig1.add_subplot(111, projection='3d')
+ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
+ax.set_xlim3d(-8, 8)
+ax.set_ylim3d(-8, 8)
+ax.set_zlim3d(0, 10)
+plt.ion()
+
+plt.show()
 
 def create_dwm_sock():
     # Create sock and bind
@@ -242,7 +262,7 @@ def calc_pos(X0, la, lb, lc, ld):
     lowb = [-math.inf, -math.inf, 0]
     upb = [math.inf, math.inf, math.inf]
 
-
+    start = time.time()
     res = least_squares(func1, X0, loss='cauchy', f_scale=0.001, bounds=(lowb, upb),
                         #args=(la, lb, lc, ld), verbose=1)
                         args=(la, lb, lc, ld), verbose=0)
@@ -250,27 +270,19 @@ def calc_pos(X0, la, lb, lc, ld):
     ##also decent and fast
     # res = minimize(func1, X0, method="L-BFGS-B", bounds=[(-math.inf, math.inf), (-math.inf, math.inf), (0, math.inf)],
     #                #options={'ftol': 1e-4, 'disp': True}, args=(la, lb, lc, ld))
-    #                options={'ftol': 1e-4,'eps' : 1e-4, 'disp': True}, args=(la, lb, lc, ld))
+    #                options={'ftol': 1e-4,'eps' : 1e-4, 'disp': False}, args=(la, lb, lc, ld))
 
     # res = minimize(func1, X0, method="SLSQP", bounds=[(-math.inf, math.inf), (-math.inf, math.inf), (0, math.inf)],
     #           #options={ 'ftol': 1e-5, 'disp': True}, args=(la, lb, lc, ld))
-    #           options={'ftol': 1e-5,'eps' : 1e-4, 'disp': True}, args=(la, lb, lc, ld))
+    #           options={'ftol': 1e-5,'eps' : 1e-4, 'disp': False}, args=(la, lb, lc, ld))
 
+    stop = time.time()
+    print("calc time {}".format(stop - start))
     # experiments
     #res = minimize(func1, X0, method='BFGS', options={'xatol': 1e-8, 'disp': True}, args=(la, lb, lc, ld))
     #res = optimize.shgo(func1, bounds=[(-10, 10), (-10, 10), (0, 10)], args=(la, lb, lc, ld),n=200, iters=5, sampling_method='sobol')
     #res = minimize(func1, X0, method='BFGS', options={'disp': True}, args=(la, lb, lc, ld))
     return res.x
-
-total_pos = 0
-total_calc = 0
-
-rects = [[A, B, D, C]]
-fig1 = plt.figure()
-ax = fig1.add_subplot(111, projection='3d')
-ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
-
-
 
 while True:
     ax.cla()
@@ -291,9 +303,10 @@ while True:
     x = loc['calc_pos']['x']/1000
     y = loc['calc_pos']['y']/1000
     z = loc['calc_pos']['z']/1000
-    X.append(x)
-    Y.append(y)
-    Z.append(z)
+    # X.append(x)
+    # Y.append(y)
+    # Z.append(z)
+    ts = loc["ts"]["sec"]  # ignore usec so far
 
     print(">> get distances")
 
@@ -324,13 +337,13 @@ while True:
     X_lse.append(X_calc[0])
     Y_lse.append(X_calc[1])
     Z_lse.append(X_calc[2])
+    T.append(ts)
 
-    # Keep only last N
-    N_last_coords = 50
-    if N_last_coords > 0:
-        X_lse = X_lse[-N_last_coords:]
-        Y_lse = Y_lse[-N_last_coords:]
-        Z_lse = Z_lse[-N_last_coords:]
+    while ts - T[0] > hist_len_sec:
+        X_lse.popleft()
+        Y_lse.popleft()
+        Z_lse.popleft()
+        T.popleft()
 
     if len(X_lse) > 11:
         X_filtered = savgol_filter(X_lse, 11, 5)
@@ -346,9 +359,4 @@ while True:
 
         plt.pause(0.01)
 
-print("total pos norm: ", total_pos, " total calc norm: ", total_calc)
-
-#X_lse, Y_lse, Z_lse = wiener(np.array([X_lse, Y_lse, Z_lse]))
-
-# just some empiric values
-
+    print("total pos norm: ", total_pos, " total calc norm: ", total_calc)
