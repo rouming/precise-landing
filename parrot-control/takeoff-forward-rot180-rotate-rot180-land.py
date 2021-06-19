@@ -30,7 +30,7 @@ def send_parrot_data(sock, alt, roll, pitch, yaw):
     sec = usec / 1000000
     usec %= 1000000
 
-    buf = struct.pack("iiffff", sec, usec, alt, roll, pitch, yaw)
+    buf = struct.pack("iiffff", int(sec), int(usec), alt, roll, pitch, yaw)
     sock.sendto(buf, (UDP_IP, UDP_PORT))
 
 class FlightListener(olympe.EventListener):
