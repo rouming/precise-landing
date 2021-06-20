@@ -35,10 +35,6 @@ B = np.array([0.54,0.00,0.00]) # 262d
 C = np.array([0.00,0.54,0.00]) # 260f
 D = np.array([0.00,0.00,0.00]) # 2852
 
-# X = []
-# Y = []
-# Z = []
-
 
 X_lse = collections.deque()
 Y_lse = collections.deque()
@@ -54,8 +50,8 @@ rects = [[A, B, D, C]]
 fig1 = plt.figure()
 ax = fig1.add_subplot(111, projection='3d')
 ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
-ax.set_xlim3d(-8, 8)
-ax.set_ylim3d(-8, 8)
+ax.set_xlim3d(-8 , 8)
+ax.set_ylim3d(-8 , 8)
 ax.set_zlim3d(0, 10)
 plt.ion()
 
@@ -95,9 +91,9 @@ def receive_dwm_location_from_sock(sock):
 
     location = {
         'calc_pos': {
-            'x':  float(x),
-            'y':  float(y),
-            'z':  float(z),
+            'x':  float(x) / 1000,
+            'y':  float(y) / 1000,
+            'z':  float(z) / 1000,
             'qf': pos_qf,
             'valid': pos_valid,
         },
@@ -126,14 +122,14 @@ def receive_dwm_location_from_sock(sock):
 
         anchor = {
             'pos': {
-                'x':  float(x),
-                'y':  float(y),
-                'z':  float(z),
+                'x':  float(x) / 1000,
+                'y':  float(y) / 1000,
+                'z':  float(z) / 1000,
                 'qf': pos_qf,
                 'valid': pos_valid,
             },
             'dist': {
-                'dist': float(dist),
+                'dist': float(dist) /1000,
                 'addr': addr,
                 'qf': dist_qf
             },
@@ -203,10 +199,14 @@ def find_anchor_by_addr(location, addr):
 
     return None
 
-def func1(X, la, lb, lc, ld):
-    ret = (np.linalg.norm(X - A) - la) ** 2 + (np.linalg.norm(X - B) - lb) ** 2 + \
-          (np.linalg.norm(X - C) - lc) ** 2 + (np.linalg.norm(X - D) - ld) ** 2
-    return ret
+def func1(X, loc):
+    sum = 0
+    for anch in loc["anchors"]:
+        anchor_pos = np.array([anch["pos"]["x"], anch["pos"]["y"], anch["pos"]["z"]])
+        dist = anch["dist"]["dist"]
+        sum += (np.linalg.norm(X - anchor_pos) - dist) ** 2
+
+    return sum
 
 # grad is probably wrong, check it later
 # btw it works fine without it
@@ -249,7 +249,7 @@ def jac(X, la, lb, lc, ld):
 
 
 assigned = False
-def calc_pos(X0, la, lb, lc, ld):
+def calc_pos(X0, loc):
 
     # all are the experiments
     #res = least_squares(func, X0, loss='soft_l1', jac=jac, bounds=([-3, -3, 0.0], [3, 3, 3]), args=(la, lb, lc, ld), verbose=1)
@@ -265,7 +265,7 @@ def calc_pos(X0, la, lb, lc, ld):
     start = time.time()
     res = least_squares(func1, X0, loss='cauchy', f_scale=0.001, bounds=(lowb, upb),
                         #args=(la, lb, lc, ld), verbose=1)
-                        args=(la, lb, lc, ld), verbose=0)
+                        args=[loc], verbose=0)
 
     ##also decent and fast
     # res = minimize(func1, X0, method="L-BFGS-B", bounds=[(-math.inf, math.inf), (-math.inf, math.inf), (0, math.inf)],
@@ -300,30 +300,22 @@ while True:
 
     print(">> got calculated position from the engine")
 
-    x = loc['calc_pos']['x']/1000
-    y = loc['calc_pos']['y']/1000
-    z = loc['calc_pos']['z']/1000
-    # X.append(x)
-    # Y.append(y)
-    # Z.append(z)
+    x = loc['calc_pos']['x']
+    y = loc['calc_pos']['y']
+    z = loc['calc_pos']['z']
+
     ts = loc["ts"]["sec"]  # ignore usec so far
 
     print(">> get distances")
-
-    la = find_anchor_by_addr(loc, 0x2585)['dist']['dist'] /1000
-    lb = find_anchor_by_addr(loc, 0x262d)['dist']['dist'] /1000
-    lc = find_anchor_by_addr(loc, 0x260f)['dist']['dist'] /1000
-    ld = find_anchor_by_addr(loc, 0x28b9)['dist']['dist'] /1000
 
     if not assigned:
         X0 = np.abs(np.array([x, y, z]))
         assigned = True
 
-    X_calc = calc_pos(X0, la, lb, lc, ld)
-    #X_calc = calc_pos([0, 0, 0], la, lb, lc, ld)
-    #X_calc = calc_pos(np.abs([x, y ,z]), la, lb, lc, ld)
-    f_pos = func1([x, y ,z], la, lb, lc ,ld)
-    c_pos = func1(X_calc, la, lb, lc ,ld)
+    X_calc = calc_pos(X0, loc)
+
+    f_pos = func1(np.array([x, y, z]), loc)
+    c_pos = func1(X_calc, loc)
     print("POS: ", x, y , z, " func(pos): ", f_pos, " C :", X_calc[0], X_calc[1], X_calc[2], " func1(X_calc): ", c_pos)
 
     f_pos_norm = np.linalg.norm(f_pos)

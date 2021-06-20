@@ -7,9 +7,9 @@ import numpy as np
 anchors_id = ["a:0x00002585", "a:0x0000262d", "a:0x0000260f", "a:0x00002852"]
 addr = [0x2585, 0x262d, 0x260f, 0x28b9]
 
-A = [54, 54, 0] # 2585
-B = [54,0,0] # 262d
-C = [0,54,0] # 260f
+A = [540, 540, 0] # 2585
+B = [540,0,0] # 262d
+C = [0,540,0] # 260f
 D = [0,0,0] # 2852
 
 def get_dist(line, id):
@@ -19,7 +19,7 @@ def get_dist(line, id):
 
     return int(val)
 
-file1 = open('data/field-session-1/log.6', 'r')
+file1 = open('data/field-session-1/log.1', 'r')
 
 
 MCAST_GRP = '224.1.1.1'
