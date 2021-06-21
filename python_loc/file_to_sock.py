@@ -2,25 +2,8 @@ import struct
 import time
 import socket
 import ctypes
-import numpy as np
-
-anchors_id = ["a:0x00002585", "a:0x0000262d", "a:0x0000260f", "a:0x00002852"]
-addr = [0x2585, 0x262d, 0x260f, 0x28b9]
-
-A = [540, 540, 0] # 2585
-B = [540,0,0] # 262d
-C = [0,540,0] # 260f
-D = [0,0,0] # 2852
-
-def get_dist(line, id):
-    l = line.split(id+"[")[1]
-    l = l.split("d=")[1]
-    val = l.split(",")[0]
-
-    return int(val)
 
 file1 = open('data/field-session-1/log.1', 'r')
-
 
 MCAST_GRP = '224.1.1.1'
 MCAST_PORT = 5555
@@ -38,53 +21,85 @@ while True:
     if not line:
         break
 
-    if anchors_id[0] not in line:
+    if not line.startswith("ts:"):
         continue
-    if anchors_id[1] not in line:
-        continue
-    if anchors_id[2] not in line:
-        continue
-    if anchors_id[3] not in line:
-        continue
+    line = line.replace(" ", "")
 
-    ts = line[line.find(":")+1 : line.find(" ")]
+    ts = line[line.find(":")+1 : line.find("[")]
     ts_s , ts_us = ts.split(".")
     ts_s = int(ts_s)
     ts_us = int(ts_us)
 
-    r = line.split(" [")[1]
-    r = r.split("]#")[0]
+    vals = line[line.find("[")+1 : line.find("]")]
+    vals = vals.split(",")
+    pos_x = int(vals[0])
+    pos_y = int(vals[1])
+    pos_z = int(vals[2])
+    pos_qf = int(vals[3])
+    pos_valid = 1 # is it?
 
-    vals = r.split(',')
-    x = int(vals[0])
-    y = int(vals[1])
-    z = int(vals[2])
+    anchor_cnt = 0
+    start = 0
+    anchors = []
 
-    la = get_dist(line, 'a:0x00002585')
-    lb = get_dist(line, 'a:0x0000262d')
-    lc = get_dist(line, 'a:0x0000260f')
-    ld = get_dist(line, 'a:0x00002852') # now it is 0x28b9
+    while (anchor_cnt < 4):
+        start = line.find("a:", start)
+        if start == -1:
+            break
 
-    nr_anchors = 4
+        addr = line[start+2 : line.find("[", start)]
+        addr = int(addr, base=16)
+
+        anchor_pos = line[line.find("[", start)+1 : line.find("]", start)]
+        x, y, z, pos_qf = anchor_pos.split(",")
+        pos_qf = int(pos_qf)
+
+        dist = line[line.find("d=", start)+2 : line.find(",qf=", start)]
+        dist = int(dist)
+
+        dist_qf = line[line.find("qf=", start)+3 : line.find("#", start)]
+        dist_qf = int(dist_qf)
+        anchor = {
+            'pos': {
+                'x':  int(x),
+                'y':  int(y),
+                'z':  int(z),
+                'qf': pos_qf,
+                'valid': pos_valid,
+            },
+            'dist': {
+                'dist': int(dist),
+                'addr': addr,
+                'qf': dist_qf
+            },
+        }
+
+        anchors.append(anchor)
+        start += 1
+        anchor_cnt += 1
+
+    if (len(anchors) == 0):
+        continue
+
+    nr_anchors = len(anchors)  # is is not used
+
     fmt = "iiihhiii"
-
     buff = ctypes.create_string_buffer(512)
 
-    struct.pack_into(fmt, buff, 0, x, y, z, 0, 0, ts_s, ts_us, nr_anchors)
+    # (x, y, z, pos_qf, pos_valid, ts_sec, ts_usec, nr_anchors)
+    struct.pack_into(fmt, buff, 0, pos_x, pos_y, pos_z, pos_qf, pos_valid, ts_s, ts_us, nr_anchors)
     off = struct.calcsize(fmt)
 
-    fmt = "iiihhihh"
-    struct.pack_into(fmt, buff, off, A[0], A[1], A[2], 100, 1, la, addr[0], 100)
-    off += struct.calcsize(fmt)
+    for anchor in anchors:
+        fmt = "iiihhihh"
 
-    struct.pack_into(fmt, buff, off, B[0], B[1], B[2], 100, 1, lb, addr[1], 100)
-    off += struct.calcsize(fmt)
-
-    struct.pack_into(fmt, buff, off, C[0], C[1], C[2], 100, 1, lc, addr[2], 100)
-    off += struct.calcsize(fmt)
-
-    struct.pack_into(fmt, buff, off, D[0], D[1], D[2], 100, 1, ld, addr[3], 100)
-    off += struct.calcsize(fmt)
+        # (x, y, z, pos_qf, pos_valid, dist, addr, dist_qf)
+        struct.pack_into(fmt, buff, off,
+                         anchor["pos"]["x"], anchor["pos"]["y"], anchor["pos"]["z"],
+                         anchor["pos"]["qf"], anchor["pos"]["valid"],
+                         anchor["dist"]["dist"], anchor["dist"]["addr"],
+                         anchor["dist"]["qf"])
+        off += struct.calcsize(fmt)
 
     if last_ts != 0:
         delay = (float(ts) - last_ts) / speed

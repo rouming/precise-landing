@@ -284,14 +284,18 @@ def calc_pos(X0, loc):
     #res = minimize(func1, X0, method='BFGS', options={'disp': True}, args=(la, lb, lc, ld))
     return res.x
 
+
+X_filtered = []
+Y_filtered = []
+Z_filtered = []
 while True:
     ax.cla()
 
     print(">> get location from 4 anchors")
 
     loc, parrot_data = get_dwm_location_or_parrot_data()
-    if loc is None or len(loc['anchors']) != 4:
-        continue
+    # if loc is None or len(loc['anchors']) != 4:
+    #     continue
 
     if parrot_data is not None:
         print("## get parrot data: alt %f roll %f pitch %f yaw %f" % \
@@ -341,15 +345,19 @@ while True:
         X_filtered = savgol_filter(X_lse, 11, 5)
         Y_filtered = savgol_filter(Y_lse, 11, 5)
         Z_filtered = savgol_filter(Z_lse, 11, 5)
+    else:
+        X_filtered = np.append(X_filtered, X_lse[-1])
+        Y_filtered = np.append(Y_filtered, Y_lse[-1])
+        Z_filtered = np.append(Z_filtered, Z_lse[-1])
 
-        plt.plot(X_filtered, Y_filtered, Z_filtered, color='g')
-        ax.scatter(X_filtered, Y_filtered, Z_filtered, color='r', s=0.8)
-        ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
-        ax.set_xlim3d(-8, 8)
-        ax.set_ylim3d(-8, 8)
-        ax.set_zlim3d(0, 10)
+    plt.plot(X_filtered, Y_filtered, Z_filtered, color='g')
+    ax.scatter(X_filtered, Y_filtered, Z_filtered, color='r', s=0.8)
+    ax.scatter(X_filtered[-1], Y_filtered[-1], Z_filtered[-1], color='b', s=5)
+    ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
+    ax.set_xlim3d(-8, 8)
+    ax.set_ylim3d(-8, 8)
+    ax.set_zlim3d(0, 10)
 
-        plt.pause(0.000001)
-
+    plt.pause(0.000001)
 
     print("total pos norm: ", total_pos, " total calc norm: ", total_calc)
