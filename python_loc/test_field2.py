@@ -41,21 +41,38 @@ Y_lse = collections.deque()
 Z_lse = collections.deque()
 T = collections.deque()
 
+X_filtered = []
+Y_filtered = []
+Z_filtered = []
+
 hist_len_sec = 10
 
 total_pos = 0
 total_calc = 0
 
-rects = [[A, B, D, C]]
-fig1 = plt.figure()
-ax = fig1.add_subplot(111, projection='3d')
-ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
-ax.set_xlim3d(-8 , 8)
-ax.set_ylim3d(-8 , 8)
-ax.set_zlim3d(0, 10)
-plt.ion()
+X_LIM = 5
+Y_LIM = 5
+Z_LIM = 2
 
-plt.show()
+rects = [[A, B, D, C]]
+
+def draw_scene(ax, X_filtered, Y_filtered, Z_filtered):
+    if len(X_filtered) > 0:
+        plt.plot(X_filtered, Y_filtered, Z_filtered, color='g')
+        ax.scatter(X_filtered, Y_filtered, Z_filtered, color='r', s=0.8)
+        ax.scatter(X_filtered[-1], Y_filtered[-1], Z_filtered[-1], color='b', s=5)
+
+        ax.text2D(0.0, 1, "x={:.2f}".format(X_filtered[-1]), transform=ax.transAxes)
+        ax.text2D(0.0, 0.97, "y={:.2f}".format(Y_filtered[-1]), transform=ax.transAxes)
+        ax.text2D(0.0, 0.94, "z={:.2f}".format(Z_filtered[-1]), transform=ax.transAxes)
+
+    ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
+    ax.set_xlim3d(-X_LIM, X_LIM)
+    ax.set_ylim3d(-Y_LIM, Y_LIM)
+    ax.set_zlim3d(0, Z_LIM)
+
+
+    plt.pause(0.000001)
 
 def create_dwm_sock():
     # Create sock and bind
@@ -284,10 +301,12 @@ def calc_pos(X0, loc):
     #res = minimize(func1, X0, method='BFGS', options={'disp': True}, args=(la, lb, lc, ld))
     return res.x
 
+fig1 = plt.figure()
+plt.ion()
+ax = fig1.add_subplot(111, projection='3d')
 
-X_filtered = []
-Y_filtered = []
-Z_filtered = []
+draw_scene(ax, X_filtered, Y_filtered, Z_filtered)
+
 while True:
     ax.cla()
 
@@ -341,23 +360,15 @@ while True:
         Z_lse.popleft()
         T.popleft()
 
-    if len(X_lse) > 11:
-        X_filtered = savgol_filter(X_lse, 11, 5)
-        Y_filtered = savgol_filter(Y_lse, 11, 5)
-        Z_filtered = savgol_filter(Z_lse, 11, 5)
-    else:
+    if len(X_lse) > 15:
+        X_filtered = savgol_filter(X_lse, 15, 5)
+        Y_filtered = savgol_filter(Y_lse, 15, 5)
+        Z_filtered = savgol_filter(Z_lse, 15, 5)
+    elif len(X_lse) > 0:
         X_filtered = np.append(X_filtered, X_lse[-1])
         Y_filtered = np.append(Y_filtered, Y_lse[-1])
         Z_filtered = np.append(Z_filtered, Z_lse[-1])
 
-    plt.plot(X_filtered, Y_filtered, Z_filtered, color='g')
-    ax.scatter(X_filtered, Y_filtered, Z_filtered, color='r', s=0.8)
-    ax.scatter(X_filtered[-1], Y_filtered[-1], Z_filtered[-1], color='b', s=5)
-    ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
-    ax.set_xlim3d(-8, 8)
-    ax.set_ylim3d(-8, 8)
-    ax.set_zlim3d(0, 10)
-
-    plt.pause(0.000001)
+    draw_scene(ax, X_filtered, Y_filtered, Z_filtered)
 
     print("total pos norm: ", total_pos, " total calc norm: ", total_calc)

@@ -3,7 +3,7 @@ import time
 import socket
 import ctypes
 
-file1 = open('data/field-session-1/log.1', 'r')
+file1 = open('data/field-session-2/log.4.leastsq', 'r')
 
 MCAST_GRP = '224.1.1.1'
 MCAST_PORT = 5555
