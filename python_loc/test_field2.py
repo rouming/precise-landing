@@ -45,26 +45,33 @@ X_filtered = []
 Y_filtered = []
 Z_filtered = []
 
-hist_len_sec = 10
+hist_len_sec = 100000
 
 total_pos = 0
 total_calc = 0
 
-X_LIM = 5
-Y_LIM = 5
-Z_LIM = 2
+X_LIM = 7
+Y_LIM = 7
+Z_LIM = 7
 
 rects = [[A, B, D, C]]
 
-def draw_scene(ax, X_filtered, Y_filtered, Z_filtered):
+def draw_scene(ax, X_filtered, Y_filtered, Z_filtered, ts):
     if len(X_filtered) > 0:
         plt.plot(X_filtered, Y_filtered, Z_filtered, color='g')
         ax.scatter(X_filtered, Y_filtered, Z_filtered, color='r', s=0.8)
         ax.scatter(X_filtered[-1], Y_filtered[-1], Z_filtered[-1], color='b', s=5)
 
-        ax.text2D(0.0, 1, "x={:.2f}".format(X_filtered[-1]), transform=ax.transAxes)
-        ax.text2D(0.0, 0.97, "y={:.2f}".format(Y_filtered[-1]), transform=ax.transAxes)
-        ax.text2D(0.0, 0.94, "z={:.2f}".format(Z_filtered[-1]), transform=ax.transAxes)
+        ax.text2D(0.0, 1, "ts={}".format(ts), transform=ax.transAxes)
+        ax.text2D(0.0, 0.96, "x={:.2f}".format(X_filtered[-1]), transform=ax.transAxes)
+        ax.text2D(0.0, 0.93, "y={:.2f}".format(Y_filtered[-1]), transform=ax.transAxes)
+        ax.text2D(0.0, 0.90, "z={:.2f}".format(Z_filtered[-1]), transform=ax.transAxes)
+
+    if parrot_data is not None:
+        ax.text2D(0.0, 0.86, "p_alt={:.2f}".format(parrot_data["alt"]), transform=ax.transAxes)
+        ax.text2D(0.0, 0.82, "diff ={:.2f}".format(Z_filtered[-1] - parrot_data["alt"]),
+                  transform=ax.transAxes)
+
 
     ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
     ax.set_xlim3d(-X_LIM, X_LIM)
@@ -281,17 +288,18 @@ def calc_pos(X0, loc):
 
     start = time.time()
     res = least_squares(func1, X0, loss='cauchy', f_scale=0.001, bounds=(lowb, upb),
+    #res = least_squares(func1, X0, bounds=(lowb, upb),
                         #args=(la, lb, lc, ld), verbose=1)
                         args=[loc], verbose=0)
 
     ##also decent and fast
     # res = minimize(func1, X0, method="L-BFGS-B", bounds=[(-math.inf, math.inf), (-math.inf, math.inf), (0, math.inf)],
     #                #options={'ftol': 1e-4, 'disp': True}, args=(la, lb, lc, ld))
-    #                options={'ftol': 1e-4,'eps' : 1e-4, 'disp': False}, args=(la, lb, lc, ld))
+    #                options={'ftol': 1e-4,'eps' : 1e-4, 'disp': False}, args=loc)
 
     # res = minimize(func1, X0, method="SLSQP", bounds=[(-math.inf, math.inf), (-math.inf, math.inf), (0, math.inf)],
-    #           #options={ 'ftol': 1e-5, 'disp': True}, args=(la, lb, lc, ld))
-    #           options={'ftol': 1e-5,'eps' : 1e-4, 'disp': False}, args=(la, lb, lc, ld))
+    #           options={ 'ftol': 1e-5, 'disp': True}, args=loc)
+    #           #options={'ftol': 1e-5,'eps' : 1e-8, 'disp': False}, args=loc)
 
     stop = time.time()
     print("calc time {}".format(stop - start))
@@ -305,7 +313,7 @@ fig1 = plt.figure()
 plt.ion()
 ax = fig1.add_subplot(111, projection='3d')
 
-draw_scene(ax, X_filtered, Y_filtered, Z_filtered)
+draw_scene(ax, X_filtered, Y_filtered, Z_filtered, 0)
 
 while True:
     ax.cla()
@@ -327,7 +335,8 @@ while True:
     y = loc['calc_pos']['y']
     z = loc['calc_pos']['z']
 
-    ts = loc["ts"]["sec"]  # ignore usec so far
+    # ugly as shit, change the data format!
+    ts = float(str(loc["ts"]["sec"]) + "." +str(loc["ts"]["usec"])) # ignore usec so far
 
     print(">> get distances")
 
@@ -337,21 +346,14 @@ while True:
 
     X_calc = calc_pos(X0, loc)
 
-    f_pos = func1(np.array([x, y, z]), loc)
-    c_pos = func1(X_calc, loc)
-    print("POS: ", x, y , z, " func(pos): ", f_pos, " C :", X_calc[0], X_calc[1], X_calc[2], " func1(X_calc): ", c_pos)
-
-    f_pos_norm = np.linalg.norm(f_pos)
-    c_pos_norm = np.linalg.norm(c_pos)
-    total_pos += f_pos_norm
-    total_calc += c_pos_norm
-
-    print("norm f(pos): ", f_pos_norm, " norm f(X_calc): ", c_pos_norm)
-
     X0 = X_calc
     X_lse.append(X_calc[0])
     Y_lse.append(X_calc[1])
-    Z_lse.append(X_calc[2])
+    #Z_lse.append(X_calc[2])
+    if parrot_data is not None and (ts - parrot_data["ts"]["sec"] < 2):
+        Z_lse.append(parrot_data["alt"])
+    else:
+        Z_lse.append(X_calc[2])
     T.append(ts)
 
     while ts - T[0] > hist_len_sec:
@@ -361,14 +363,28 @@ while True:
         T.popleft()
 
     if len(X_lse) > 15:
-        X_filtered = savgol_filter(X_lse, 15, 5)
-        Y_filtered = savgol_filter(Y_lse, 15, 5)
-        Z_filtered = savgol_filter(Z_lse, 15, 5)
+        X_filtered = savgol_filter(X_lse, 15, 5, mode="nearest")
+        Y_filtered = savgol_filter(Y_lse, 15, 5, mode="nearest")
+        Z_filtered = savgol_filter(Z_lse, 15, 5, mode="nearest")
     elif len(X_lse) > 0:
         X_filtered = np.append(X_filtered, X_lse[-1])
         Y_filtered = np.append(Y_filtered, Y_lse[-1])
         Z_filtered = np.append(Z_filtered, Z_lse[-1])
 
-    draw_scene(ax, X_filtered, Y_filtered, Z_filtered)
+    draw_scene(ax, X_filtered, Y_filtered, Z_filtered, ts)
+
+    xf = X_filtered[-1]
+    yf = Y_filtered[-1]
+    zf = Z_filtered[-1]
+    f_pos = func1(np.array([x, y, z]), loc)
+    c_pos = func1([xf, yf, zf], loc)
+    print("POS: ", x, y , z, " func(pos): ", f_pos, " C :", xf, yf, zf, " func1(X_calc): ", c_pos)
+
+    f_pos_norm = np.linalg.norm(f_pos)
+    c_pos_norm = np.linalg.norm(c_pos)
+    total_pos += f_pos_norm
+    total_calc += c_pos_norm
+
+    print("norm f(pos): ", f_pos_norm, " norm f(X_calc): ", c_pos_norm)
 
     print("total pos norm: ", total_pos, " total calc norm: ", total_calc)

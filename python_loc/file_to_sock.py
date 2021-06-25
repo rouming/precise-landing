@@ -3,23 +3,49 @@ import time
 import socket
 import ctypes
 
-file1 = open('data/field-session-2/log.4.leastsq', 'r')
+file1 = open('data/field-session-2/log.1', 'r')
 
 MCAST_GRP = '224.1.1.1'
 MCAST_PORT = 5555
-
 MULTICAST_TTL = 2
+
+
+PARROT_IP = "127.0.0.1"
+PARROT_PORT = 5556
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
 sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL)
 
+parot_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
 last_ts = 0
+last_ts_s = 0
+last_ts_us = 0
+
 speed = 2
+
+def send_parrot_data(line):
+    fields = line[line.find("alt") : -1].split(" ")
+    fmt = "iiffff"
+
+    alt = float(fields[1])
+    roll = float(fields[3])
+    pitch = float(fields[5])
+    yaw = float(fields[7])
+
+    buff = ctypes.create_string_buffer(512)
+    struct.pack_into(fmt, buff, 0, last_ts_s, last_ts_us, alt, roll, pitch, yaw)
+    parot_sock.sendto(buff, (PARROT_IP, PARROT_PORT))
+
 
 while True:
     line = file1.readline()
     if not line:
         break
+
+    if line.startswith("## get parrot data:"):
+        send_parrot_data(line)
+        continue
 
     if not line.startswith("ts:"):
         continue
@@ -106,6 +132,8 @@ while True:
         print("cur time: {} delay: {}".format(float(ts), delay))
         time.sleep(delay)
         last_ts = float(ts)
+        last_ts_s = ts_s
+        last_ts_us = ts_us
 
     else:
         last_ts = float(ts)
