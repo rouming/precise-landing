@@ -56,20 +56,26 @@ Z_LIM = 7
 
 rects = [[A, B, D, C]]
 
+first_ts = 0
+
 def draw_scene(ax, X_filtered, Y_filtered, Z_filtered, ts):
+    global first_ts
+
+    if first_ts == 0 and ts != first_ts:
+        first_ts = ts
+
     if len(X_filtered) > 0:
         plt.plot(X_filtered, Y_filtered, Z_filtered, color='g')
         ax.scatter(X_filtered, Y_filtered, Z_filtered, color='r', s=0.8)
         ax.scatter(X_filtered[-1], Y_filtered[-1], Z_filtered[-1], color='b', s=5)
 
-        ax.text2D(0.0, 1, "ts={}".format(ts), transform=ax.transAxes)
-        ax.text2D(0.0, 0.96, "x={:.2f}".format(X_filtered[-1]), transform=ax.transAxes)
-        ax.text2D(0.0, 0.93, "y={:.2f}".format(Y_filtered[-1]), transform=ax.transAxes)
-        ax.text2D(0.0, 0.90, "z={:.2f}".format(Z_filtered[-1]), transform=ax.transAxes)
+        ax.text2D(0.0, 1, "     x         y          z", transform=ax.transAxes)
+        ax.text2D(0.0, 0.96, "{:7.2f} {:7.2f} {:7.2f}     {:7.3f}s".format(
+                  X_filtered[-1], Y_filtered[-1], Z_filtered[-1], ts - first_ts), transform=ax.transAxes)
 
     if parrot_data is not None:
-        ax.text2D(0.0, 0.86, "p_alt={:.2f}".format(parrot_data["alt"]), transform=ax.transAxes)
-        ax.text2D(0.0, 0.82, "diff ={:.2f}".format(Z_filtered[-1] - parrot_data["alt"]),
+        ax.text2D(0.0, 0.86, " alt {:6.2f}m".format(parrot_data["alt"]), transform=ax.transAxes)
+        ax.text2D(0.0, 0.82, "diff {:6.2f}m".format(Z_filtered[-1] - parrot_data["alt"]),
                   transform=ax.transAxes)
 
 
