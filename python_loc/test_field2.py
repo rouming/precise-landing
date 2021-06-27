@@ -121,10 +121,7 @@ def receive_dwm_location_from_sock(sock):
             'qf': pos_qf,
             'valid': pos_valid,
         },
-        'ts': {
-            'sec':  ts_sec,
-            'usec': ts_usec,
-        },
+        'ts': float("%ld.%06ld" % (ts_sec, ts_usec)),
         'anchors': [],
     }
 
@@ -172,10 +169,7 @@ def receive_parrot_data_from_sock(sock):
     sec, usec, alt, roll, pitch, yaw = struct.unpack(fmt, buf)
 
     parrot_data = {
-        'ts': {
-            'sec':  sec,
-            'usec': usec,
-        },
+        'ts':    float("%ld.%06ld" % (sec, usec)),
         'alt':   alt,
         'roll':  roll,
         'pitch': pitch,
@@ -334,9 +328,7 @@ while True:
     x = loc['calc_pos']['x']
     y = loc['calc_pos']['y']
     z = loc['calc_pos']['z']
-
-    # ugly as shit, change the data format!
-    ts = float(str(loc["ts"]["sec"]) + "." +str(loc["ts"]["usec"])) # ignore usec so far
+    ts = loc["ts"]
 
     print(">> get distances")
 
@@ -350,7 +342,7 @@ while True:
     X_lse.append(X_calc[0])
     Y_lse.append(X_calc[1])
     #Z_lse.append(X_calc[2])
-    if parrot_data is not None and (ts - parrot_data["ts"]["sec"] < 2):
+    if parrot_data is not None and (ts - parrot_data["ts"] < 2):
         Z_lse.append(parrot_data["alt"])
     else:
         Z_lse.append(X_calc[2])
