@@ -58,7 +58,7 @@ rects = [[A, B, D, C]]
 
 first_ts = 0
 
-def draw_scene(ax, X_filtered, Y_filtered, Z_filtered, ts):
+def draw_scene(ax, X_filtered, Y_filtered, Z_filtered, ts, anch_cnt):
     global first_ts
 
     if first_ts == 0 and ts != first_ts:
@@ -70,8 +70,9 @@ def draw_scene(ax, X_filtered, Y_filtered, Z_filtered, ts):
         ax.scatter(X_filtered[-1], Y_filtered[-1], Z_filtered[-1], color='b', s=5)
 
         ax.text2D(0.0, 1, "     x         y          z", transform=ax.transAxes)
-        ax.text2D(0.0, 0.96, "{:7.2f} {:7.2f} {:7.2f}     {:7.3f}s".format(
-                  X_filtered[-1], Y_filtered[-1], Z_filtered[-1], ts - first_ts), transform=ax.transAxes)
+        ax.text2D(0.0, 0.96, "{:7.2f} {:7.2f} {:7.2f}     {:7.3f}s    #{} anch".format(
+                  X_filtered[-1], Y_filtered[-1], Z_filtered[-1], ts - first_ts, anch_cnt),
+                  transform=ax.transAxes)
 
     if parrot_data is not None:
         ax.text2D(0.0, 0.86, " alt {:6.2f}m".format(parrot_data["alt"]), transform=ax.transAxes)
@@ -313,7 +314,7 @@ fig1 = plt.figure()
 plt.ion()
 ax = fig1.add_subplot(111, projection='3d')
 
-draw_scene(ax, X_filtered, Y_filtered, Z_filtered, 0)
+draw_scene(ax, X_filtered, Y_filtered, Z_filtered, 0, 0)
 
 while True:
     ax.cla()
@@ -369,7 +370,7 @@ while True:
         Y_filtered = np.append(Y_filtered, Y_lse[-1])
         Z_filtered = np.append(Z_filtered, Z_lse[-1])
 
-    draw_scene(ax, X_filtered, Y_filtered, Z_filtered, ts)
+    draw_scene(ax, X_filtered, Y_filtered, Z_filtered, ts, len(loc['anchors']))
 
     xf = X_filtered[-1]
     yf = Y_filtered[-1]
