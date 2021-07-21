@@ -33,7 +33,10 @@ class Ctrl(Enum):
         MOVE_DOWN,
         TURN_LEFT,
         TURN_RIGHT,
-    ) = range(11)
+
+        UNBLOCK_OTHER_INPUT,
+        BLOCK_OTHER_INPUT,
+    ) = range(13)
 
 
 QWERTY_CTRL_KEYS = {
@@ -48,6 +51,9 @@ QWERTY_CTRL_KEYS = {
     Ctrl.MOVE_DOWN: Key.down,
     Ctrl.TURN_LEFT: Key.left,
     Ctrl.TURN_RIGHT: Key.right,
+
+    Ctrl.UNBLOCK_OTHER_INPUT: "u",  # "unblock" other input
+    Ctrl.BLOCK_OTHER_INPUT: "b", # "block" other input
 }
 
 AZERTY_CTRL_KEYS = QWERTY_CTRL_KEYS.copy()
@@ -110,6 +116,7 @@ class FlightListener(olympe.EventListener):
 
 class KeyboardCtrl(Listener):
     def __init__(self, ctrl_keys=None):
+        self._other_input_blocked = False
         self._ctrl_keys = self._get_ctrl_keys(ctrl_keys)
         self._key_pressed = defaultdict(lambda: False)
         self._last_action_ts = defaultdict(lambda: 0.0)
@@ -117,21 +124,38 @@ class KeyboardCtrl(Listener):
         self.start()
 
     def _on_press(self, key):
+        char = None
         if isinstance(key, KeyCode):
-            self._key_pressed[key.char] = True
+            char = key.char
         elif isinstance(key, Key):
-            self._key_pressed[key] = True
+            char = key
+
+        self._key_pressed[char] = True
+
+        # Handle enable/disable of other input separetely
+        if char == self._ctrl_keys[Ctrl.UNBLOCK_OTHER_INPUT]:
+            self._other_input_blocked = False
+        elif char == self._ctrl_keys[Ctrl.BLOCK_OTHER_INPUT]:
+            self._other_input_blocked = True
+
         if self._key_pressed[self._ctrl_keys[Ctrl.QUIT]]:
             return False
         else:
             return True
 
     def _on_release(self, key):
+        char = None
         if isinstance(key, KeyCode):
-            self._key_pressed[key.char] = False
+            char = key.char
         elif isinstance(key, Key):
-            self._key_pressed[key] = False
+            char = key
+
+        self._key_pressed[char] = False
+
         return True
+
+    def other_input_blocked(self):
+        return self._other_input_blocked
 
     def quit(self):
         return not self.running or self._key_pressed[self._ctrl_keys[Ctrl.QUIT]]
