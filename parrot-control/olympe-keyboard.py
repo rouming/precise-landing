@@ -60,24 +60,31 @@ AZERTY_CTRL_KEYS.update(
     }
 )
 
-UDP_IP = '127.0.0.1'
-UDP_PORT = 5556
+UDP_TELEMETRY_IP = '127.0.0.1'
+UDP_TELEMETRY_PORT = 5556
 
-alt   = 0.0
-roll  = 0.0
-pitch = 0.0
-yaw   = 0.0
-
-def send_parrot_data(sock, alt, roll, pitch, yaw):
-    ns = time.time_ns()
-    usec = ns / 1000
-    sec = usec / 1000000
-    usec %= 1000000
-
-    buf = struct.pack("iiffff", int(sec), int(usec), alt, roll, pitch, yaw)
-    sock.sendto(buf, (UDP_IP, UDP_PORT))
 
 class FlightListener(olympe.EventListener):
+    def __init__(self, drone):
+        # Create telemetry sock
+        self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        self._alt   = 0.0
+        self._roll  = 0.0
+        self._pitch = 0.0
+        self._yaw   = 0.0
+
+        super().__init__(drone)
+
+    def send_parrot_telemetry(self):
+        ns = time.time_ns()
+        usec = ns / 1000
+        sec = usec / 1000000
+        usec %= 1000000
+
+        buf = struct.pack("iiffff", int(sec), int(usec), self._alt,
+                          self._roll, self._pitch, self._yaw)
+        self._sock.sendto(buf, (UDP_TELEMETRY_IP, UDP_TELEMETRY_PORT))
 
     @olympe.listen_event(FlyingStateChanged() | AlertStateChanged() | NavigateHomeStateChanged())
     def onStateChanged(self, event, scheduler):
@@ -90,20 +97,16 @@ class FlightListener(olympe.EventListener):
     @olympe.listen_event(AltitudeChanged())
     def onAltitudeChanged(self, event, scheduler):
         print("altitude = {altitude}".format(**event.args))
-
-        global sock, alt, roll, pitch, yaw
-        alt  = event.args['altitude']
-        send_parrot_data(sock, alt, roll, pitch, yaw)
+        self._alt  = event.args['altitude']
+        self.send_parrot_telemetry()
 
     @olympe.listen_event(AttitudeChanged())
     def onAttitudeChanged(self, event, scheduler):
         print("roll = {roll}  pitch = {pitch}  yaw = {yaw}".format(**event.args))
-
-        global sock, alt, roll, pitch, yaw
-        roll  = event.args['roll']
-        pitch = event.args['pitch']
-        yaw   = event.args['yaw']
-        send_parrot_data(sock, alt, roll, pitch, yaw)
+        self._roll  = event.args['roll']
+        self._pitch = event.args['pitch']
+        self._yaw   = event.args['yaw']
+        self.send_parrot_telemetry()
 
 class KeyboardCtrl(Listener):
     def __init__(self, ctrl_keys=None):
