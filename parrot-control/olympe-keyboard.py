@@ -69,6 +69,8 @@ AZERTY_CTRL_KEYS.update(
 UDP_TELEMETRY_IP = '127.0.0.1'
 UDP_TELEMETRY_PORT = 5556
 
+UDP_COMMANDS_IP = '127.0.0.1'
+UDP_COMMANDS_PORT = 5557
 
 class FlightListener(olympe.EventListener):
     def __init__(self, drone):
@@ -116,7 +118,7 @@ class FlightListener(olympe.EventListener):
 
 class KeyboardCtrl(Listener):
     def __init__(self, ctrl_keys=None):
-        self._other_input_blocked = False
+        self._other_input_blocked = True
         self._ctrl_keys = self._get_ctrl_keys(ctrl_keys)
         self._key_pressed = defaultdict(lambda: False)
         self._last_action_ts = defaultdict(lambda: 0.0)
@@ -237,10 +239,71 @@ class KeyboardCtrl(Listener):
 
         return ctrl_keys
 
-if __name__ == "__main__":
-    # Create UDP sock
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+class DronePilotingCmd():
+    def __init__(self, roll, pitch, yaw, throttle):
+        self._roll = roll
+        self._pitch = pitch
+        self._yaw = yaw
+        self._throttle = throttle
 
+    def roll(self):
+        return self._roll
+
+    def pitch(self):
+        return self._pitch
+
+    def yaw(self):
+        return self._yaw
+
+    def throttle(self):
+        return self._throttle
+
+class SockCtrl():
+    def __init__(self):
+        # Create commands sock
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.bind((UDP_COMMANDS_IP, UDP_COMMANDS_PORT))
+        sock.setblocking(0)
+
+        self._sock = sock
+        self._cmds = []
+
+    def _process_sock_commands(self):
+        # 4x signed chars
+        fmt = "bbbb"
+        sz = struct.calcsize(fmt)
+        # Should be pow2
+        assert not ((sz - 1) & sz)
+
+        try:
+            buf = self._sock.recv(4096)
+        except:
+            # EAGAIN
+            return
+
+        off = 0
+        while off < len(buf):
+            (roll, pitch, yaw, throttle) = struct.unpack_from(fmt, buf, off)
+            self._cmds.append(DronePilotingCmd(roll, pitch, yaw, throttle))
+            off += sz;
+
+    def has_piloting_cmd(self):
+        self._process_sock_commands()
+        return len(self._cmds) > 0
+
+    def get_piloting_cmd(self):
+        return self._cmds.pop(0)
+
+def send_drone_pcmd(drone, cmd):
+    drone(PCMD(1,
+               cmd.roll(),
+               cmd.pitch(),
+               cmd.yaw(),
+               cmd.throttle(),
+               timestampAndSeqNum=0)
+    )
+
+if __name__ == "__main__":
     # Reduce log level
     olympe.log.update_config({"loggers": {"olympe": {"level": "WARNING"}}})
 
@@ -248,23 +311,23 @@ if __name__ == "__main__":
     with FlightListener(drone):
         drone.connect()
         drone(setPilotingSource(source="Controller")).wait()
-        control = KeyboardCtrl()
-        while not control.quit():
-            if control.takeoff():
+        kb_ctrl = KeyboardCtrl()
+        sock_ctrl = SockCtrl()
+        while not kb_ctrl.quit():
+            other_input_blocked = kb_ctrl.other_input_blocked()
+
+            if kb_ctrl.takeoff():
                 drone(TakeOff())
-            elif control.landing():
+            elif kb_ctrl.landing():
                 drone(Landing())
-            if control.has_piloting_cmd():
-                drone(
-                    PCMD(
-                        1,
-                        control.roll(),
-                        control.pitch(),
-                        control.yaw(),
-                        control.throttle(),
-                        timestampAndSeqNum=0,
-                    )
-                )
+            if kb_ctrl.has_piloting_cmd():
+                send_drone_pcmd(drone, kb_ctrl)
+            elif sock_ctrl.has_piloting_cmd():
+                cmd = sock_ctrl.get_piloting_cmd()
+                if not other_input_blocked:
+                    send_drone_pcmd(drone, cmd)
             else:
                 drone(PCMD(0, 0, 0, 0, 0, timestampAndSeqNum=0))
-            time.sleep(0.05)
+
+            if not sock_ctrl.has_piloting_cmd():
+                time.sleep(0.05)
