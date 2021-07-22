@@ -348,6 +348,9 @@ def receive_parrot_data_from_sock(sock):
         'yaw':   yaw
     }
 
+    print("parrot_data: ts=%.6f alt=%f roll=%f pitch=%f yaw=%f" % \
+        (parrot_data['ts'], parrot_data['alt'], parrot_data['roll'], parrot_data['pitch'], parrot_data['yaw']))
+
     return parrot_data
 
 def get_dwm_location_or_parrot_data():
@@ -491,11 +494,6 @@ while True:
     loc, parrot_data = get_dwm_location_or_parrot_data()
     # if loc is None or len(loc['anchors']) != 4:
     #     continue
-
-    if parrot_data is not None:
-        print("## get parrot data: alt %f roll %f pitch %f yaw %f" % \
-            (parrot_data['alt'], parrot_data['roll'], \
-               parrot_data['pitch'], parrot_data['yaw']))
 
     print(">> got calculated position from the engine")
 
