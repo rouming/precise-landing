@@ -4,10 +4,12 @@ import struct
 import select
 
 import matplotlib.pyplot as plt
+from matplotlib.artist import Artist
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import numpy as np
 from scipy.optimize import least_squares
 from scipy.optimize import minimize
+from simple_pid import PID
 
 import collections
 
@@ -25,6 +27,17 @@ MCAST_PORT = 5555
 # Telemetry from drone
 UDP_TELEMETRY_IP = '127.0.0.1'
 UDP_TELEMETRY_PORT = 5556
+
+# Commands to drone
+UDP_COMMANDS_IP = '127.0.0.1'
+UDP_COMMANDS_PORT = 5557
+
+# Landing point in meters, middle of the landing platform
+LANDING_X = 0.54 / 2
+LANDING_Y = 0.54 / 2
+
+# This is the maximumum we can get from our DWL range modules
+UPDATE_RATE_HZ = 10
 
 dwm_sock    = None
 parrot_sock = None
@@ -59,6 +72,152 @@ Z_LIM = 7
 rects = [[A, B, D, C]]
 
 first_ts = 0
+
+class dynamic_plot():
+    # Time range in seconds
+    min_x = 0
+    max_x = 10
+
+    # Distange range in meters
+    min_y = -5
+    max_y = 5
+
+    # Static line
+    lines2_y = 0.0
+
+    # For cleaning
+    previous_text = None
+
+    def __init__(self, plot_title, x_label, y_label,
+                 lines1_label, lines2_label, lines2_y):
+        # Turn on plot interactive mode
+        plt.ion()
+
+        # Set up plot
+        self.figure, self.ax = plt.subplots()
+
+        # Autoscale on unknown axis and known lims on the other
+        self.ax.set_autoscaley_on(True)
+        self.ax.set(xlim=(self.min_x, self.max_x),
+                    ylim=(self.min_y, self.max_y),
+                    xlabel=x_label,
+                    ylabel=y_label,
+                    title=plot_title)
+
+        # Enable grid
+        self.ax.grid()
+
+        # Create curves on the plot
+        self.lines1, = self.ax.plot([],[], '-', label=lines1_label)
+        self.lines2, = self.ax.plot([],[], '-', label=lines2_label)
+
+        # Set other members
+        self.lines2_y = lines2_y
+        self.xdata  = []
+        self.ydata  = []
+        self.tsdata = []
+
+    def _remove_outdated_data(self):
+        now = time.time()
+
+        diff = self.max_x - self.min_x
+        ts = self.tsdata[0]
+
+        while ts < now - diff:
+            self.xdata.pop(0)
+            self.ydata.pop(0)
+            self.tsdata.pop(0)
+            ts = self.tsdata[0]
+
+    def update(self, xdata, ydata, text):
+        self.xdata.append(xdata)
+        self.ydata.append(ydata)
+        self.tsdata.append(time.time())
+
+        # Clean points which are not visible on the plot
+        self._remove_outdated_data()
+
+        # Following window
+        if xdata >= self.max_x:
+            diff = self.max_x - self.min_x
+            self.max_x = xdata
+            self.min_x = xdata - diff
+            self.ax.set_xlim(self.min_x, self.max_x)
+
+        # Update data (with the new _and_ the old points)
+        self.lines1.set_xdata(self.xdata)
+        self.lines1.set_ydata(self.ydata)
+
+        self.lines2.set_xdata([self.min_x, self.max_x])
+        self.lines2.set_ydata([self.lines2_y, self.lines2_y])
+
+        # Set text
+        if self.previous_text:
+            Artist.remove(self.previous_text)
+        self.previous_text = self.ax.text(0.0, 1.07, text, transform=self.ax.transAxes, \
+                                          bbox=dict(facecolor='green', alpha=0.3, pad=5))
+
+        # Need both of these in order to rescale
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self.ax.legend()
+
+        # We need to draw *and* flush
+        self.figure.canvas.draw()
+        self.figure.canvas.flush_events()
+
+class drone_navigator():
+    def __init__(self, target_x, target_y, update_rate_hz):
+        # Create commands sock
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+        # Set desired landing coordinates
+        x_pid = PID(2, 0.1, 0.05, setpoint=target_x)
+        y_pid = PID(2, 0.1, 0.05, setpoint=target_y)
+
+        # Control coeff limits
+        x_pid.output_limits = (-1, 1)
+        y_pid.output_limits = (-1, 1)
+
+        # Set sample time in seconds
+        x_pid.sample_time = 1.0 / update_rate_hz
+        y_pid.sample_time = 1.0 / update_rate_hz
+
+        # Create PID plots
+        pid_x_plot = dynamic_plot('PID X', 'Time (s)', 'Drone X distance (m)',
+                                  'PID', 'target', target_x)
+        pid_y_plot = dynamic_plot('PID Y', 'Time (s)', 'Drone Y distance (m)',
+                                  'PID', 'target', target_y)
+
+        self.start_time = time.time()
+        self.pid_x_plot = pid_x_plot
+        self.pid_y_plot = pid_y_plot
+
+        self.sock = sock
+        self.x_pid = x_pid
+        self.y_pid = y_pid
+
+    def _send_command(self, roll, pitch, yaw, throttle):
+        # 4x signed chars
+        buf = struct.pack("bbbb", int(roll), int(pitch), int(yaw), int(throttle))
+        self.sock.sendto(buf, (UDP_COMMANDS_IP, UDP_COMMANDS_PORT))
+
+    def navigate_drone(self, drone_x, drone_y):
+        control_x = self.x_pid(drone_x)
+        control_y = self.y_pid(drone_y)
+
+        # Parrot accepts in signed percentage, i.e. [-100, 100] range
+        roll = int(control_y * 100)
+        pitch = int(control_x * 100)
+        self._send_command(roll, pitch, 0, 0)
+
+        # Update plots
+        pid_x_text = "X %5.2f  Pitch %d" % (drone_x, pitch)
+        pid_y_text = "Y %5.2f  Roll %d" % (drone_y, roll)
+
+        ts = time.time() - self.start_time
+        self.pid_x_plot.update(ts, drone_x, pid_x_text)
+        self.pid_y_plot.update(ts, drone_y, pid_y_text)
 
 def draw_scene(ax, X_filtered, Y_filtered, Z_filtered, ts, anch_cnt):
     global first_ts
@@ -322,6 +481,8 @@ ax = fig1.add_subplot(111, projection='3d')
 
 draw_scene(ax, X_filtered, Y_filtered, Z_filtered, 0, 0)
 
+navigator = drone_navigator(LANDING_X, LANDING_Y, UPDATE_RATE_HZ)
+
 while True:
     ax.cla()
 
@@ -381,6 +542,10 @@ while True:
     xf = X_filtered[-1]
     yf = Y_filtered[-1]
     zf = Z_filtered[-1]
+
+    if navigator:
+        navigator.navigate_drone(xf, yf)
+
     f_pos = func1(np.array([x, y, z]), loc)
     c_pos = func1([xf, yf, zf], loc)
     print("POS: ", x, y , z, " func(pos): ", f_pos, " C :", xf, yf, zf, " func1(X_calc): ", c_pos)
