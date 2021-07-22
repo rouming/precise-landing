@@ -67,7 +67,11 @@ def draw_scene(ax, X_filtered, Y_filtered, Z_filtered, ts, anch_cnt):
         first_ts = ts
 
     if len(X_filtered) > 0:
-        plt.plot(X_filtered, Y_filtered, Z_filtered, color='g')
+        # FIXME: This needs to be not global 'plt' dependendent,
+        # FIXME: otherwise it affects all other dynamic plot
+        # FIXME: windows (e.g. PID). rpen
+        # plt.plot(X_filtered, Y_filtered, Z_filtered, color='g')
+
         ax.scatter(X_filtered, Y_filtered, Z_filtered, color='r', s=0.8)
         ax.scatter(X_filtered[-1], Y_filtered[-1], Z_filtered[-1], color='b', s=5)
 
