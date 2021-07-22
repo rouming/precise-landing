@@ -18,11 +18,13 @@ from scipy.signal import savgol_filter
 
 import time
 
-PARROT_IP = "127.0.0.1"
-PARROT_PORT = 5556
-
+# Distances from DWM1001-server
 MCAST_GRP = '224.1.1.1'
 MCAST_PORT = 5555
+
+# Telemetry from drone
+UDP_TELEMETRY_IP = '127.0.0.1'
+UDP_TELEMETRY_PORT = 5556
 
 dwm_sock    = None
 parrot_sock = None
@@ -104,7 +106,7 @@ def create_dwm_sock():
 def create_parrot_sock():
     # Create parrot sock
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((PARROT_IP, PARROT_PORT))
+    sock.bind((UDP_TELEMETRY_IP, UDP_TELEMETRY_PORT))
     sock.setblocking(0)
 
     return sock
