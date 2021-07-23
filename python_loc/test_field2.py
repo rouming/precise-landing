@@ -2,6 +2,8 @@ import math
 import socket
 import struct
 import select
+import os
+import re
 
 import matplotlib.pyplot as plt
 from matplotlib.artist import Artist
@@ -35,9 +37,6 @@ UDP_COMMANDS_PORT = 5557
 # Landing point in meters, middle of the landing platform
 LANDING_X = 0.54 / 2
 LANDING_Y = 0.54 / 2
-
-# This is the maximumum we can get from our DWL range modules
-UPDATE_RATE_HZ = 10
 
 dwm_sock    = None
 parrot_sock = None
@@ -154,8 +153,8 @@ class dynamic_plot():
         # Set text
         if self.previous_text:
             Artist.remove(self.previous_text)
-        self.previous_text = self.ax.text(0.0, 1.07, text, transform=self.ax.transAxes, \
-                                          bbox=dict(facecolor='green', alpha=0.3, pad=5))
+        self.previous_text = self.ax.text(0.0, 1.025, text, transform=self.ax.transAxes, \
+                                          bbox=dict(facecolor='green', alpha=0.3))
 
         # Need both of these in order to rescale
         self.ax.relim()
@@ -167,21 +166,31 @@ class dynamic_plot():
         self.figure.canvas.flush_events()
 
 class drone_navigator():
-    def __init__(self, target_x, target_y, update_rate_hz):
+    # PID tuning files, format is: float, float, float
+    pid_x_tuning_file = "./pid_x.tuning"
+    pid_y_tuning_file = "./pid_y.tuning"
+
+    # Default PID config
+    default_pid_components = (10, 30, 0.1)
+    default_pid_limits = (-100, 100)
+
+    def __init__(self, target_x, target_y):
         # Create commands sock
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+        components = self.default_pid_components
+
         # Set desired landing coordinates
-        x_pid = PID(2, 0.1, 0.05, setpoint=target_x)
-        y_pid = PID(2, 0.1, 0.05, setpoint=target_y)
+        x_pid = PID(Kp=components[0], Ki=components[1], Kd=components[2],
+                    setpoint=target_x,
+                    proportional_on_measurement=False)
+        y_pid = PID(Kp=components[0], Ki=components[1], Kd=components[2],
+                    setpoint=target_y,
+                    proportional_on_measurement=False)
 
         # Control coeff limits
-        x_pid.output_limits = (-1, 1)
-        y_pid.output_limits = (-1, 1)
-
-        # Set sample time in seconds
-        x_pid.sample_time = 1.0 / update_rate_hz
-        y_pid.sample_time = 1.0 / update_rate_hz
+        x_pid.output_limits = self.default_pid_limits
+        y_pid.output_limits = self.default_pid_limits
 
         # Create PID plots
         pid_x_plot = dynamic_plot('PID X', 'Time (s)', 'Drone X distance (m)',
@@ -202,18 +211,51 @@ class drone_navigator():
         buf = struct.pack("bbbb", int(roll), int(pitch), int(yaw), int(throttle))
         self.sock.sendto(buf, (UDP_COMMANDS_IP, UDP_COMMANDS_PORT))
 
+    def _pid_tuning(self, pid, tuning_file):
+        tunings = self.default_pid_components
+        limits = self.default_pid_limits
+
+        if os.path.exists(tuning_file):
+            with open(tuning_file, "r") as file:
+                line = file.readline()
+                components = re.findall(r"[-+]?\d*\.\d+|[-+]?\d+", line)
+                if len(components) >= 3:
+                    # To floats
+                    components = [float(f) for f in components]
+                    tunings = components[0:3]
+                    if len(components) >= 5:
+                        print(limits)
+                        limits = components[3:5]
+
+        pid.tunings = tunings
+        pid.output_limits = limits
+
     def navigate_drone(self, drone_x, drone_y):
+        self._pid_tuning(self.x_pid, self.pid_x_tuning_file)
+        self._pid_tuning(self.y_pid, self.pid_y_tuning_file)
+
         control_x = self.x_pid(drone_x)
         control_y = self.y_pid(drone_y)
 
         # Parrot accepts in signed percentage, i.e. [-100, 100] range
-        roll = int(control_y * 100)
-        pitch = int(control_x * 100)
+        roll = int(control_x)
+        pitch = int(control_y)
         self._send_command(roll, pitch, 0, 0)
 
         # Update plots
-        pid_x_text = "X %5.2f  Pitch %d" % (drone_x, pitch)
-        pid_y_text = "Y %5.2f  Roll %d" % (drone_y, roll)
+        pid_x_text = "Kp=%.2f Ki=%.2f Kd=%.2f\n" \
+                     "   %.2f    %.2f    %.2f\n" \
+                     "x %5.2f  roll %d" % \
+                     (self.x_pid.Kp, self.x_pid.Ki, self.x_pid.Kd, \
+                      self.x_pid.components[0], self.x_pid.components[1], self.x_pid.components[2], \
+                      drone_x, roll)
+
+        pid_y_text = "Kp=%.2f Ki=%.2f Kd=%.2f\n" \
+                     "   %.2f    %.2f    %.2f\n" \
+                     "y %5.2f  pitch %d" % \
+                     (self.y_pid.Kp, self.y_pid.Ki, self.y_pid.Kd, \
+                      self.y_pid.components[0], self.y_pid.components[1], self.y_pid.components[2], \
+                      drone_y, pitch)
 
         ts = time.time() - self.start_time
         self.pid_x_plot.update(ts, drone_x, pid_x_text)
@@ -484,7 +526,7 @@ ax = fig1.add_subplot(111, projection='3d')
 
 draw_scene(ax, X_filtered, Y_filtered, Z_filtered, 0, 0)
 
-navigator = drone_navigator(LANDING_X, LANDING_Y, UPDATE_RATE_HZ)
+navigator = drone_navigator(LANDING_X, LANDING_Y)
 
 while True:
     ax.cla()

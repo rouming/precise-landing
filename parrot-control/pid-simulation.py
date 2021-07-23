@@ -1,4 +1,6 @@
 import time
+import os
+import re
 import random
 import matplotlib.pyplot as plt
 from matplotlib.artist import Artist
@@ -11,8 +13,8 @@ class dynamic_plot():
     max_x = 10
 
     # Distange range in meters
-    min_y = -5
     max_y = 5
+    min_y = -5
 
     # Static line
     lines2_y = 0.0
@@ -86,8 +88,8 @@ class dynamic_plot():
         # Set text
         if self.previous_text:
             Artist.remove(self.previous_text)
-        self.previous_text = self.ax.text(0.0, 1.07, text, transform=self.ax.transAxes, \
-                                          bbox=dict(facecolor='green', alpha=0.3, pad=5))
+        self.previous_text = self.ax.text(0.0, 1.025, text, transform=self.ax.transAxes, \
+                                          bbox=dict(facecolor='green', alpha=0.3))
 
         # Need both of these in order to rescale
         self.ax.relim()
@@ -104,7 +106,7 @@ class drone:
         self.x = 4
 
     def update(self, control):
-        self.x += control * 0.1;
+        self.x += control * 0.1
 
         # Simulate random displacement
         self.x += random.uniform(-0.1, +0.1)
@@ -122,10 +124,17 @@ if __name__ == '__main__':
     drone = drone()
     drone_x = drone.x
 
+    default_pid_components = (10, 30, 0.1)
+    default_pid_limits = (-1, 1)
+
     # Set three parameters of PID and limit output
-    pid = PID(2, 0.01, 0.1, setpoint=LANDING_X)
-    pid.output_limits = (-1, 1)
-    pid.sample_time  = 0.1
+    pid = PID(Kp=default_pid_components[0],
+              Ki=default_pid_components[1],
+              Kd=default_pid_components[2],
+              setpoint=LANDING_X,
+              proportional_on_measurement=False)
+
+    pid.output_limits = default_pid_limits
 
     # Used to set time parameters
     start_time = time.time()
@@ -135,15 +144,31 @@ if __name__ == '__main__':
     setpoint, y, x = [], [], []
 
     # Set System Runtime
-    while time.time() - start_time < 20:
+    while time.time() - start_time < 100:
         # Setting the time variable dt
         current_time = time.time()
         dt = (current_time - last_time)
 
+        tuning_file = "./pid.tuning"
+
+        tunings = default_pid_components
+        limits = default_pid_limits
+        if os.path.exists(tuning_file):
+            with open(tuning_file, "r") as file:
+                line = file.readline()
+                components = re.findall(r"[-+]?\d*\.\d+|[-+]?\d+", line)
+                if len(components) >= 3:
+                    # To floats
+                    components = [float(f) for f in components]
+                    tunings = components[0:3]
+                    if len(components) >= 5:
+                        limits = components[3:5]
+        pid.tunings = tunings
+        pid.output_limits = limits
+
+        # PID update
         control = pid(drone_x)
         drone_x = drone.update(control)
-
-        print("x %f  control %f" % (drone_x, control))
 
         # Visualize Output Results
         x += [current_time - start_time]
@@ -152,8 +177,12 @@ if __name__ == '__main__':
 
         last_time = current_time
 
-        time.sleep(pid.sample_time)
-
         # Visualization of Output Results
-        text = "x %5.2f    ctrl %.2f" % (drone_x, control)
+        components = pid.components
+        text = "Kp=%.2f Ki=%.2f Kd=%.2f\n" \
+               "   %.2f    %.2f    %.2f\n" \
+               "x %5.2f    control %d" % \
+            (pid.Kp, pid.Ki, pid.Kd, \
+             components[0], components[1], components[2], \
+             drone_x, int(control))
         pid_x_plot.update(current_time - start_time, drone_x, text)

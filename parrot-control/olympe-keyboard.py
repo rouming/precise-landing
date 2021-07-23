@@ -320,13 +320,15 @@ if __name__ == "__main__":
                 drone(TakeOff())
             elif kb_ctrl.landing():
                 drone(Landing())
+
             if kb_ctrl.has_piloting_cmd():
                 send_drone_pcmd(drone, kb_ctrl)
             elif sock_ctrl.has_piloting_cmd():
                 cmd = sock_ctrl.get_piloting_cmd()
                 if not other_input_blocked:
                     send_drone_pcmd(drone, cmd)
-            else:
+            elif other_input_blocked:
+                # We send STOP cmd only if no other input
                 drone(PCMD(0, 0, 0, 0, 0, timestampAndSeqNum=0))
 
             if not sock_ctrl.has_piloting_cmd():
