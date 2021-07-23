@@ -165,7 +165,42 @@ class dynamic_plot():
         self.figure.canvas.draw()
         self.figure.canvas.flush_events()
 
+#
+# Welford's online algorithm
+# https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
+#
+class welford_state:
+    count = 0
+    mean = 0
+    m2 = 0
+
+    def avg_welford(self, new_value):
+        self.count += 1
+        delta = new_value - self.mean
+        self.mean += delta / self.count
+        delta2 = new_value - self.mean
+        self.m2 += delta * delta2
+
+        return self.mean;
+
+class avg_rate:
+    welford = welford_state()
+    ts = 0.0
+
+    def __call__(self):
+        rate = 0
+        now = time.time()
+        if self.ts:
+            rate = 1.0 / (now - self.ts)
+            rate = self.welford.avg_welford(rate)
+        self.ts = now
+
+        return rate
+
 class drone_navigator():
+    # Average update rate
+    avg_rate = avg_rate()
+
     # PID tuning files, format is: float, float, float
     pid_x_tuning_file = "./pid_x.tuning"
     pid_y_tuning_file = "./pid_y.tuning"
@@ -237,23 +272,26 @@ class drone_navigator():
         control_x = self.x_pid(drone_x)
         control_y = self.y_pid(drone_y)
 
+        # Calculate update rate
+        rate = self.avg_rate()
+
         # Parrot accepts in signed percentage, i.e. [-100, 100] range
         roll = int(control_x)
         pitch = int(control_y)
         self._send_command(roll, pitch, 0, 0)
 
         # Update plots
-        pid_x_text = "Kp=%.2f Ki=%.2f Kd=%.2f\n" \
+        pid_x_text = "Kp=%.2f Ki=%.2f Kd=%.2f   Update %.1fHz\n" \
                      "   %.2f    %.2f    %.2f\n" \
                      "x %5.2f  roll %d" % \
-                     (self.x_pid.Kp, self.x_pid.Ki, self.x_pid.Kd, \
+                     (self.x_pid.Kp, self.x_pid.Ki, self.x_pid.Kd, rate, \
                       self.x_pid.components[0], self.x_pid.components[1], self.x_pid.components[2], \
                       drone_x, roll)
 
-        pid_y_text = "Kp=%.2f Ki=%.2f Kd=%.2f\n" \
+        pid_y_text = "Kp=%.2f Ki=%.2f Kd=%.2f   Update %.1fHz\n" \
                      "   %.2f    %.2f    %.2f\n" \
                      "y %5.2f  pitch %d" % \
-                     (self.y_pid.Kp, self.y_pid.Ki, self.y_pid.Kd, \
+                     (self.y_pid.Kp, self.y_pid.Ki, self.y_pid.Kd, rate, \
                       self.y_pid.components[0], self.y_pid.components[1], self.y_pid.components[2], \
                       drone_y, pitch)
 

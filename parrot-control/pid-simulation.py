@@ -100,6 +100,37 @@ class dynamic_plot():
         self.figure.canvas.draw()
         self.figure.canvas.flush_events()
 
+#
+# Welford's online algorithm
+# https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
+#
+class welford_state:
+    count = 0
+    mean = 0
+    m2 = 0
+
+    def avg_welford(self, new_value):
+        self.count += 1
+        delta = new_value - self.mean
+        self.mean += delta / self.count
+        delta2 = new_value - self.mean
+        self.m2 += delta * delta2
+
+        return self.mean;
+
+class avg_rate:
+    welford = welford_state()
+    ts = 0.0
+
+    def __call__(self):
+        rate = 0
+        now = time.time()
+        if self.ts:
+            rate = 1.0 / (now - self.ts)
+            rate = self.welford.avg_welford(rate)
+        self.ts = now
+
+        return rate
 
 class drone:
     def __init__(self):
@@ -143,6 +174,9 @@ if __name__ == '__main__':
     # Visualize Output Results
     setpoint, y, x = [], [], []
 
+    # Average update rate
+    avg_rate = avg_rate()
+
     # Set System Runtime
     while time.time() - start_time < 100:
         # Setting the time variable dt
@@ -170,6 +204,9 @@ if __name__ == '__main__':
         control = pid(drone_x)
         drone_x = drone.update(control)
 
+        # Calculate update rate
+        rate = avg_rate()
+
         # Visualize Output Results
         x += [current_time - start_time]
         y += [drone_x]
@@ -179,10 +216,10 @@ if __name__ == '__main__':
 
         # Visualization of Output Results
         components = pid.components
-        text = "Kp=%.2f Ki=%.2f Kd=%.2f\n" \
+        text = "Kp=%.2f Ki=%.2f Kd=%.2f    Update %.1fHz\n" \
                "   %.2f    %.2f    %.2f\n" \
                "x %5.2f    control %d" % \
-            (pid.Kp, pid.Ki, pid.Kd, \
+            (pid.Kp, pid.Ki, pid.Kd, rate, \
              components[0], components[1], components[2], \
              drone_x, int(control))
         pid_x_plot.update(current_time - start_time, drone_x, text)
