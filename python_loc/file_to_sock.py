@@ -139,4 +139,3 @@ while True:
         last_ts = float(ts)
 
     sock.sendto(buff, (MCAST_GRP, MCAST_PORT))
-

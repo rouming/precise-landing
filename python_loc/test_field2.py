@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import math
 import socket
 import struct
@@ -5,16 +7,12 @@ import select
 import os
 import re
 
-import matplotlib.pyplot as plt
-from matplotlib.artist import Artist
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import numpy as np
 from scipy.optimize import least_squares
 from scipy.optimize import minimize
 from simple_pid import PID
-
 import collections
-
+import config as cfg
 
 from scipy.signal.signaltools import wiener
 from scipy.signal import savgol_filter
@@ -22,33 +20,13 @@ from scipy.signal import savgol_filter
 
 import time
 
-# Distances from DWM1001-server
-MCAST_GRP = '224.1.1.1'
-MCAST_PORT = 5555
-
-# Telemetry from drone
-UDP_TELEMETRY_IP = '127.0.0.1'
-UDP_TELEMETRY_PORT = 5556
-
-# Commands to drone
-UDP_COMMANDS_IP = '127.0.0.1'
-UDP_COMMANDS_PORT = 5557
-
-# Landing point in meters, middle of the landing platform
-LANDING_X = 0.54 / 2
-LANDING_Y = 0.54 / 2
 
 dwm_sock    = None
 parrot_sock = None
+plot_sock   = None
 
 dwm_loc     = None
 parrot_data = None
-
-A = np.array([0.54,0.54,0.00]) # 2585
-B = np.array([0.54,0.00,0.00]) # 262d
-C = np.array([0.00,0.54,0.00]) # 260f
-D = np.array([0.00,0.00,0.00]) # 2852
-
 
 X_lse = collections.deque()
 Y_lse = collections.deque()
@@ -63,107 +41,6 @@ hist_len_sec = 100000
 
 total_pos = 0
 total_calc = 0
-
-X_LIM = 7
-Y_LIM = 7
-Z_LIM = 7
-
-rects = [[A, B, D, C]]
-
-first_ts = 0
-
-class dynamic_plot():
-    # Time range in seconds
-    min_x = 0
-    max_x = 10
-
-    # Distange range in meters
-    min_y = -5
-    max_y = 5
-
-    # Static line
-    lines2_y = 0.0
-
-    # For cleaning
-    previous_text = None
-
-    def __init__(self, plot_title, x_label, y_label,
-                 lines1_label, lines2_label, lines2_y):
-        # Turn on plot interactive mode
-        plt.ion()
-
-        # Set up plot
-        self.figure, self.ax = plt.subplots()
-
-        # Autoscale on unknown axis and known lims on the other
-        self.ax.set_autoscaley_on(True)
-        self.ax.set(xlim=(self.min_x, self.max_x),
-                    ylim=(self.min_y, self.max_y),
-                    xlabel=x_label,
-                    ylabel=y_label,
-                    title=plot_title)
-
-        # Enable grid
-        self.ax.grid()
-
-        # Create curves on the plot
-        self.lines1, = self.ax.plot([],[], '-', label=lines1_label)
-        self.lines2, = self.ax.plot([],[], '-', label=lines2_label)
-
-        # Set other members
-        self.lines2_y = lines2_y
-        self.xdata  = []
-        self.ydata  = []
-        self.tsdata = []
-
-    def _remove_outdated_data(self):
-        now = time.time()
-
-        diff = self.max_x - self.min_x
-        ts = self.tsdata[0]
-
-        while ts < now - diff:
-            self.xdata.pop(0)
-            self.ydata.pop(0)
-            self.tsdata.pop(0)
-            ts = self.tsdata[0]
-
-    def update(self, xdata, ydata, text):
-        self.xdata.append(xdata)
-        self.ydata.append(ydata)
-        self.tsdata.append(time.time())
-
-        # Clean points which are not visible on the plot
-        self._remove_outdated_data()
-
-        # Following window
-        if xdata >= self.max_x:
-            diff = self.max_x - self.min_x
-            self.max_x = xdata
-            self.min_x = xdata - diff
-            self.ax.set_xlim(self.min_x, self.max_x)
-
-        # Update data (with the new _and_ the old points)
-        self.lines1.set_xdata(self.xdata)
-        self.lines1.set_ydata(self.ydata)
-
-        self.lines2.set_xdata([self.min_x, self.max_x])
-        self.lines2.set_ydata([self.lines2_y, self.lines2_y])
-
-        # Set text
-        if self.previous_text:
-            Artist.remove(self.previous_text)
-        self.previous_text = self.ax.text(0.0, 1.025, text, transform=self.ax.transAxes, \
-                                          bbox=dict(facecolor='green', alpha=0.3))
-
-        # Need both of these in order to rescale
-        self.ax.relim()
-        self.ax.autoscale_view()
-        self.ax.legend()
-
-        # We need to draw *and* flush
-        self.figure.canvas.draw()
-        self.figure.canvas.flush_events()
 
 #
 # Welford's online algorithm
@@ -227,15 +104,7 @@ class drone_navigator():
         x_pid.output_limits = self.default_pid_limits
         y_pid.output_limits = self.default_pid_limits
 
-        # Create PID plots
-        pid_x_plot = dynamic_plot('PID X', 'Time (s)', 'Drone X distance (m)',
-                                  'PID', 'target', target_x)
-        pid_y_plot = dynamic_plot('PID Y', 'Time (s)', 'Drone Y distance (m)',
-                                  'PID', 'target', target_y)
-
         self.start_time = time.time()
-        self.pid_x_plot = pid_x_plot
-        self.pid_y_plot = pid_y_plot
 
         self.sock = sock
         self.x_pid = x_pid
@@ -244,7 +113,7 @@ class drone_navigator():
     def _send_command(self, roll, pitch, yaw, throttle):
         # 4x signed chars
         buf = struct.pack("bbbb", int(roll), int(pitch), int(yaw), int(throttle))
-        self.sock.sendto(buf, (UDP_COMMANDS_IP, UDP_COMMANDS_PORT))
+        self.sock.sendto(buf, (cfg.UDP_COMMANDS_IP, cfg.UDP_COMMANDS_PORT))
 
     def _pid_tuning(self, pid, tuning_file):
         tunings = self.default_pid_components
@@ -280,67 +149,17 @@ class drone_navigator():
         pitch = int(control_y)
         self._send_command(roll, pitch, 0, 0)
 
-        # Update plots
-        pid_x_text = "Kp=%.2f Ki=%.2f Kd=%.2f   Update %.1fHz\n" \
-                     "   %.2f    %.2f    %.2f\n" \
-                     "x %5.2f  roll %d" % \
-                     (self.x_pid.Kp, self.x_pid.Ki, self.x_pid.Kd, rate, \
-                      self.x_pid.components[0], self.x_pid.components[1], self.x_pid.components[2], \
-                      drone_x, roll)
+        return roll, pitch, rate
 
-        pid_y_text = "Kp=%.2f Ki=%.2f Kd=%.2f   Update %.1fHz\n" \
-                     "   %.2f    %.2f    %.2f\n" \
-                     "y %5.2f  pitch %d" % \
-                     (self.y_pid.Kp, self.y_pid.Ki, self.y_pid.Kd, rate, \
-                      self.y_pid.components[0], self.y_pid.components[1], self.y_pid.components[2], \
-                      drone_y, pitch)
-
-        ts = time.time() - self.start_time
-        self.pid_x_plot.update(ts, drone_x, pid_x_text)
-        self.pid_y_plot.update(ts, drone_y, pid_y_text)
-
-def draw_scene(ax, X_filtered, Y_filtered, Z_filtered, ts, anch_cnt):
-    global first_ts
-
-    if first_ts == 0 and ts != first_ts:
-        first_ts = ts
-
-    if len(X_filtered) > 0:
-        # FIXME: This needs to be not global 'plt' dependendent,
-        # FIXME: otherwise it affects all other dynamic plot
-        # FIXME: windows (e.g. PID). rpen
-        # plt.plot(X_filtered, Y_filtered, Z_filtered, color='g')
-
-        ax.scatter(X_filtered, Y_filtered, Z_filtered, color='r', s=0.8)
-        ax.scatter(X_filtered[-1], Y_filtered[-1], Z_filtered[-1], color='b', s=5)
-
-        ax.text2D(0.0, 1, "     x         y          z", transform=ax.transAxes)
-        ax.text2D(0.0, 0.96, "{:7.2f} {:7.2f} {:7.2f}     {:7.3f}s    #{} anch".format(
-                  X_filtered[-1], Y_filtered[-1], Z_filtered[-1], ts - first_ts, anch_cnt),
-                  transform=ax.transAxes)
-
-    if parrot_data is not None:
-        ax.text2D(0.0, 0.86, " alt {:6.2f}m".format(parrot_data["alt"]), transform=ax.transAxes)
-        ax.text2D(0.0, 0.82, "diff {:6.2f}m".format(Z_filtered[-1] - parrot_data["alt"]),
-                  transform=ax.transAxes)
-
-
-    ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
-    ax.set_xlim3d(-X_LIM, X_LIM)
-    ax.set_ylim3d(-Y_LIM, Y_LIM)
-    ax.set_zlim3d(0, Z_LIM)
-
-
-    plt.pause(0.000001)
 
 def create_dwm_sock():
     # Create sock and bind
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind((MCAST_GRP, MCAST_PORT))
+    sock.bind((cfg.MCAST_GRP, cfg.MCAST_PORT))
 
     # Join group
-    mreq = struct.pack("4sl", socket.inet_aton(MCAST_GRP), socket.INADDR_ANY)
+    mreq = struct.pack("4sl", socket.inet_aton(cfg.MCAST_GRP), socket.INADDR_ANY)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     sock.setblocking(0)
 
@@ -349,10 +168,30 @@ def create_dwm_sock():
 def create_parrot_sock():
     # Create parrot sock
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind((UDP_TELEMETRY_IP, UDP_TELEMETRY_PORT))
+    sock.bind((cfg.UDP_TELEMETRY_IP, cfg.UDP_TELEMETRY_PORT))
     sock.setblocking(0)
 
     return sock
+
+def create_plot_sock():
+    # Create plot sock
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+    return sock
+
+def send_plot_data(sock, x, y, z, parrot_alt, ts, nr_anchors, roll, pitch, rate, navigator):
+    x_pid = navigator.x_pid
+    y_pid = navigator.y_pid
+
+    # 1 double, 17 floats, 3 int32
+    buf = struct.pack("dfffffffffffffffffiii",
+                      ts, x, y, z, parrot_alt, rate,
+                      x_pid.Kp, x_pid.Ki, x_pid.Kd,
+                      x_pid.components[0], x_pid.components[1], x_pid.components[2],
+                      y_pid.Kp, y_pid.Ki, y_pid.Kd,
+                      y_pid.components[0], y_pid.components[1], y_pid.components[2],
+                      roll, pitch, nr_anchors)
+    sock.sendto(buf, (cfg.UDP_PLOT_IP, cfg.UDP_PLOT_PORT))
 
 def receive_dwm_location_from_sock(sock):
     # Location header
@@ -558,17 +397,10 @@ def calc_pos(X0, loc):
     #res = minimize(func1, X0, method='BFGS', options={'disp': True}, args=(la, lb, lc, ld))
     return res.x
 
-fig1 = plt.figure()
-plt.ion()
-ax = fig1.add_subplot(111, projection='3d')
-
-draw_scene(ax, X_filtered, Y_filtered, Z_filtered, 0, 0)
-
-navigator = drone_navigator(LANDING_X, LANDING_Y)
+navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y)
+plot_sock = create_plot_sock()
 
 while True:
-    ax.cla()
-
     print(">> get location from 4 anchors")
 
     loc, parrot_data = get_dwm_location_or_parrot_data()
@@ -581,6 +413,8 @@ while True:
     y = loc['calc_pos']['y']
     z = loc['calc_pos']['z']
     ts = loc["ts"]
+
+    parrot_alt = 0
 
     print(">> get distances")
 
@@ -595,6 +429,7 @@ while True:
     Y_lse.append(X_calc[1])
     #Z_lse.append(X_calc[2])
     if parrot_data is not None and (ts - parrot_data["ts"] < 2):
+        parrot_alt = parrot_data["alt"]
         Z_lse.append(parrot_data["alt"])
     else:
         Z_lse.append(X_calc[2])
@@ -615,14 +450,11 @@ while True:
         Y_filtered = np.append(Y_filtered, Y_lse[-1])
         Z_filtered = np.append(Z_filtered, Z_lse[-1])
 
-    draw_scene(ax, X_filtered, Y_filtered, Z_filtered, ts, len(loc['anchors']))
-
     xf = X_filtered[-1]
     yf = Y_filtered[-1]
     zf = Z_filtered[-1]
 
-    if navigator:
-        navigator.navigate_drone(xf, yf)
+    roll, pitch, rate = navigator.navigate_drone(xf, yf)
 
     f_pos = func1(np.array([x, y, z]), loc)
     c_pos = func1([xf, yf, zf], loc)
@@ -634,5 +466,10 @@ while True:
     total_calc += c_pos_norm
 
     print("norm f(pos): ", f_pos_norm, " norm f(X_calc): ", c_pos_norm)
-
     print("total pos norm: ", total_pos, " total calc norm: ", total_calc)
+
+    # Send all math output to the plot
+    ts = time.time()
+    nr_anchors = len(loc['anchors'])
+    send_plot_data(plot_sock, xf, yf, zf, parrot_alt, ts,
+                   nr_anchors, roll, pitch, rate, navigator)
