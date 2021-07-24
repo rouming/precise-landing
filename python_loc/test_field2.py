@@ -371,8 +371,8 @@ def calc_pos(X0, loc):
     # if lowb[2] < 0:
     #     lowb[2] = 0
     # upb = X0+0.2
-    lowb = [-math.inf, -math.inf, 0]
-    upb = [math.inf, math.inf, math.inf]
+    lowb = [-np.inf, -np.inf, 0]
+    upb = [np.inf, np.inf, np.inf]
 
     start = time.time()
     res = least_squares(func1, X0, loss='cauchy', f_scale=0.001, bounds=(lowb, upb),
