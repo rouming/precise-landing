@@ -69,7 +69,10 @@ class avg_rate:
         now = time.time()
         if self.ts:
             rate = 1.0 / (now - self.ts)
-            rate = self.welford.avg_welford(rate)
+            # Disable average, sometimes we have very high @rate
+            # so the whole average goes mad, better to see rate in
+            # momentum
+            #rate = self.welford.avg_welford(rate)
         self.ts = now
 
         return rate
