@@ -412,7 +412,12 @@ while True:
     x = loc['calc_pos']['x']
     y = loc['calc_pos']['y']
     z = loc['calc_pos']['z']
+    qf = loc['calc_pos']['qf']
     ts = loc["ts"]
+
+    if x == 0 and y == 0 and z == 0 and qf == 0:
+        # Skip now, please FIXME math guru!
+        continue
 
     parrot_alt = 0
 
