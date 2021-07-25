@@ -14,6 +14,8 @@ X_LIM = 7
 Y_LIM = 7
 Z_LIM = 7
 
+DRAW_3D_SCENE = False
+
 parrot_data = None
 
 class dynamic_plot():
@@ -185,8 +187,9 @@ if __name__ == '__main__':
                               'PID', 'target', cfg.LANDING_Y)
 
     # Create 3D plot
-    fig3d = plt.figure()
-    ax3d = fig3d.add_subplot(111, projection='3d')
+    if DRAW_3D_SCENE:
+        fig3d = plt.figure()
+        ax3d = fig3d.add_subplot(111, projection='3d')
 
     # Create plot sock
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -229,4 +232,5 @@ if __name__ == '__main__':
         pid_y_plot.update(ts, y, pid_y_text)
 
         # Draw 3d scene
-        draw_scene(ax3d, X, Y, Z, parrot_alt, ts, nr_anchors)
+        if DRAW_3D_SCENE:
+            draw_scene(ax3d, X, Y, Z, parrot_alt, ts, nr_anchors)
