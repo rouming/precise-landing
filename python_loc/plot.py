@@ -22,8 +22,8 @@ class dynamic_plot():
     max_x = 10
 
     # Distange range in meters
-    min_y = -5
-    max_y = 5
+    min_y = -2
+    max_y = 2
 
     # Static line
     lines2_y = 0.0
