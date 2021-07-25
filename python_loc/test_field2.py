@@ -78,9 +78,8 @@ class drone_navigator():
     # Average update rate
     avg_rate = avg_rate()
 
-    # PID tuning files, format is: float, float, float
-    pid_x_tuning_file = "./pid_x.tuning"
-    pid_y_tuning_file = "./pid_y.tuning"
+    # PID tuning files, format is: float float float [float, float]
+    pid_tuning_file = "./pid.tuning"
 
     # Default PID config
     default_pid_components = (10, 30, 0.1)
@@ -127,6 +126,9 @@ class drone_navigator():
                     # To floats
                     components = [float(f) for f in components]
                     tunings = components[0:3]
+                    if pid.Kp != tunings[0] or pid.Ki != tunings[1] or \
+                       pid.Kd != tunings[2]:
+                        pid.reset()
                     if len(components) >= 5:
                         print(limits)
                         limits = components[3:5]
@@ -135,8 +137,8 @@ class drone_navigator():
         pid.output_limits = limits
 
     def navigate_drone(self, drone_x, drone_y):
-        self._pid_tuning(self.x_pid, self.pid_x_tuning_file)
-        self._pid_tuning(self.y_pid, self.pid_y_tuning_file)
+        self._pid_tuning(self.x_pid, self.pid_tuning_file)
+        self._pid_tuning(self.y_pid, self.pid_tuning_file)
 
         control_x = self.x_pid(drone_x)
         control_y = self.y_pid(drone_y)
