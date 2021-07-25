@@ -3,6 +3,7 @@ import os
 import re
 import random
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from matplotlib.artist import Artist
 from simple_pid import PID
 import numpy
@@ -147,6 +148,10 @@ class drone:
 LANDING_X = 0.54 / 2
 
 if __name__ == '__main__':
+    # Remove toolback with buttons from plots. This is needed because
+    # when drone is being controlled with the keyboard plots react
+    # on button press.
+    mpl.rcParams['toolbar'] = 'None'
 
     pid_x_plot = dynamic_plot('PID X', 'Time (s)', 'Drone X distance (m)',
                               'PID', 'target', LANDING_X)

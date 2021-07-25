@@ -5,6 +5,7 @@ import struct
 import select
 import time
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 from matplotlib.artist import Artist
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 import config as cfg
@@ -169,6 +170,11 @@ def recv_math_output(sock):
     return *data, dropped
 
 if __name__ == '__main__':
+    # Remove toolback with buttons from plots. This is needed because
+    # when drone is being controlled with the keyboard plots react
+    # on button press.
+    mpl.rcParams['toolbar'] = 'None'
+
     # Plot interactive
     plt.ion()
 
