@@ -319,7 +319,7 @@ def find_anchor_by_addr(location, addr):
 def func1(X, loc):
     sum = 0
     for anch in loc["anchors"]:
-        anchor_pos = np.array([anch["pos"]["x"], anch["pos"]["y"], anch["pos"]["z"]])
+        anchor_pos = np.array([anch["pos"]["x"], anch["pos"]["y"], anch["pos"]["z"]], dtype=np.float64)
         dist = anch["dist"]["dist"]
         sum += (np.linalg.norm(X - anchor_pos) - dist) ** 2
 
@@ -406,11 +406,12 @@ navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y)
 plot_sock = create_plot_sock()
 
 while True:
-    print(">> get location from 4 anchors")
+    print(">> get location from anchors")
 
     loc, parrot_data = get_dwm_location_or_parrot_data()
-    # if loc is None or len(loc['anchors']) != 4:
-    #     continue
+    if loc is None or len(loc['anchors']) < 2:
+        print("skip the data, not enough anchors")
+        continue
 
     print(">> got calculated position from the engine")
 
@@ -419,10 +420,6 @@ while True:
     z = loc['calc_pos']['z']
     qf = loc['calc_pos']['qf']
     ts = loc["ts"]
-
-    if x == 0 and y == 0 and z == 0 and qf == 0:
-        # Skip now, please FIXME math guru!
-        continue
 
     parrot_alt = 0
 

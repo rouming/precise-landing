@@ -104,9 +104,6 @@ while True:
         start += 1
         anchor_cnt += 1
 
-    if (len(anchors) == 0):
-        continue
-
     nr_anchors = len(anchors)  # is is not used
 
     fmt = "iiihhiii"
