@@ -403,8 +403,8 @@ def calc_pos(X0, loc):
     upb = [np.inf, np.inf, np.inf]
 
     start = time.time()
-    res = least_squares(func1, X0, loss='cauchy', f_scale=0.001, bounds=(lowb, upb),
-    #res = least_squares(func1, X0, bounds=(lowb, upb),
+    #res = least_squares(func1, X0, loss='cauchy', f_scale=0.001, bounds=(lowb, upb),
+    res = least_squares(func1, X0, bounds=(lowb, upb),
                         #args=(la, lb, lc, ld), verbose=1)
                         args=[loc], verbose=0)
 
