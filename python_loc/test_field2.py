@@ -275,6 +275,9 @@ def receive_parrot_data_from_sock(sock):
 
     return parrot_data
 
+def is_dwm_location_reliable(loc):
+    return len(loc['anchors']) >= 3
+
 def get_dwm_location_or_parrot_data():
     global dwm_sock, parrot_sock, dwm_loc, parrot_data
 
@@ -283,25 +286,22 @@ def get_dwm_location_or_parrot_data():
     if parrot_sock is None:
         parrot_sock = create_parrot_sock()
 
-    timeout = 0
-    received = False
+    dwm_received = False
 
     # Suck everything from the socket, we need really up-to-date data
     while (True):
+        # Wait inifinitely if we don't have reliable DWM location
+        timeout = 0 if dwm_received else None
+
         rd, wr, ex = select.select([dwm_sock, parrot_sock], [], [], timeout)
         if 0 == len(rd):
-            if received:
-                break
-            else:
-                # Wait for data
-                timeout = None
-                continue
-
-        received = True
-        timeout = 0
+            break
 
         if dwm_sock in rd:
-            dwm_loc = receive_dwm_location_from_sock(dwm_sock)
+            loc = receive_dwm_location_from_sock(dwm_sock)
+            if is_dwm_location_reliable(loc):
+                dwm_received = True
+                dwm_loc = loc
         if parrot_sock in rd:
             parrot_data = receive_parrot_data_from_sock(parrot_sock)
 
@@ -407,9 +407,6 @@ while True:
     print(">> get location from anchors")
 
     loc, parrot_data = get_dwm_location_or_parrot_data()
-    if loc is None or len(loc['anchors']) < 2:
-        print("skip the data, not enough anchors")
-        continue
 
     print(">> got calculated position from the engine")
 
