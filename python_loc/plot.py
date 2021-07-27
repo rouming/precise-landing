@@ -8,6 +8,10 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 from matplotlib.artist import Artist
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
+
+from scipy.ndimage.filters import uniform_filter1d
+from scipy.signal import savgol_filter
+
 import config as cfg
 
 X_LIM = 7
@@ -15,6 +19,7 @@ Y_LIM = 7
 Z_LIM = 7
 
 DRAW_3D_SCENE = False
+PLOT_FILTERED = False
 
 parrot_data = None
 
@@ -56,10 +61,16 @@ class dynamic_plot():
         self.lines1, = self.ax.plot([],[], '-', label=lines1_label)
         self.lines2, = self.ax.plot([],[], '-', label=lines2_label)
 
+        if PLOT_FILTERED:
+            self.filtered1, = self.ax.plot([],[], '-', label="Savgol")
+            self.filtered2, = self.ax.plot([],[], '-', label="Uniform")
+
         # Set other members
         self.lines2_y = lines2_y
         self.xdata  = []
         self.ydata  = []
+        self.ydata_filtered1 = []
+        self.ydata_filtered2 = []
 
     def _remove_outdated_data(self):
         width = (self.max_x - self.min_x) * 2
@@ -69,11 +80,17 @@ class dynamic_plot():
         while first < last - width:
             self.xdata.pop(0)
             self.ydata.pop(0)
+            if PLOT_FILTERED:
+                self.ydata_filtered1.pop(0)
+                self.ydata_filtered2.pop(0)
             first = self.xdata[0]
 
-    def update(self, xdata, ydata, text):
+    def update(self, xdata, ydata, ydata_filtered1, ydata_filtered2, text):
         self.xdata.append(xdata)
         self.ydata.append(ydata)
+        if PLOT_FILTERED:
+            self.ydata_filtered1.append(ydata_filtered1)
+            self.ydata_filtered2.append(ydata_filtered2)
 
         # Clean points which are not visible on the plot
         self._remove_outdated_data()
@@ -92,6 +109,13 @@ class dynamic_plot():
         self.lines2.set_xdata([self.min_x, self.max_x])
         self.lines2.set_ydata([self.lines2_y, self.lines2_y])
 
+        if PLOT_FILTERED:
+            self.filtered1.set_xdata(self.xdata)
+            self.filtered1.set_ydata(self.ydata_filtered1)
+
+            self.filtered2.set_xdata(self.xdata)
+            self.filtered2.set_ydata(self.ydata_filtered2)
+
         # Set text
         if self.previous_text:
             Artist.remove(self.previous_text)
@@ -99,7 +123,6 @@ class dynamic_plot():
                                           bbox=dict(facecolor='green', alpha=0.3))
 
         # Need both of these in order to rescale
-        self.ax.relim()
         self.ax.autoscale_view()
         self.ax.legend()
 
@@ -211,6 +234,28 @@ if __name__ == '__main__':
         Y.append(y)
         Z.append(z)
 
+        X_f1 = 0.0
+        X_f2 = 0.0
+        Y_f1 = 0.0
+        Y_f2 = 0.0
+
+        if PLOT_FILTERED:
+            moving_window = 15
+
+            if len(X) < moving_window:
+                continue
+
+            X_filtered1 = savgol_filter(X, moving_window, 5, mode="nearest")
+            X_filtered2 = uniform_filter1d(X, size=moving_window, mode="reflect")
+
+            Y_filtered1 = savgol_filter(Y, moving_window, 5, mode="nearest")
+            Y_filtered2 = uniform_filter1d(Y, size=moving_window, mode="reflect")
+
+            X_f1 = X_filtered1[-1]
+            X_f2 = X_filtered2[-1]
+            Y_f1 = Y_filtered1[-1]
+            Y_f2 = Y_filtered2[-1]
+
         # PID texts
         pid_x_text = "Kp=%.2f Ki=%.2f Kd=%.2f   Update %.1fHz  dropped %d\n" \
                      "   %.2f    %.2f    %.2f\n" \
@@ -228,8 +273,8 @@ if __name__ == '__main__':
         ts -= start_ts
 
         # Update PID plots
-        pid_x_plot.update(ts, x, pid_x_text)
-        pid_y_plot.update(ts, y, pid_y_text)
+        pid_x_plot.update(ts, x, X_f1, X_f2, pid_x_text)
+        pid_y_plot.update(ts, y, Y_f1, Y_f2, pid_y_text)
 
         # Draw 3d scene
         if DRAW_3D_SCENE:

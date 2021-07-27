@@ -14,6 +14,7 @@ from scipy.optimize import minimize
 from simple_pid import PID
 import config as cfg
 
+from scipy.ndimage.filters import uniform_filter1d
 from scipy.signal.signaltools import wiener
 from scipy.signal import savgol_filter
 #X_f, Y_f, Z_f = wiener(np.array([X_lse, Y_lse, Z_lse]))
@@ -471,14 +472,26 @@ while True:
         Z_lse.pop(0)
         T.pop(0)
 
-    if len(X_lse) > 15:
-        X_filtered = savgol_filter(X_lse, 15, 5, mode="nearest")
-        Y_filtered = savgol_filter(Y_lse, 15, 5, mode="nearest")
-        Z_filtered = savgol_filter(Z_lse, 15, 5, mode="nearest")
-    elif len(X_lse) > 0:
-        X_filtered = np.append(X_filtered, X_lse[-1])
-        Y_filtered = np.append(Y_filtered, Y_lse[-1])
-        Z_filtered = np.append(Z_filtered, Z_lse[-1])
+    apply_filter = 2
+
+    if apply_filter:
+        moving_window = 15
+
+        if len(X_lse) < moving_window:
+            continue
+
+        if apply_filter == 1:
+            X_filtered = savgol_filter(X_lse, moving_window, 5, mode="nearest")
+            Y_filtered = savgol_filter(Y_lse, moving_window, 5, mode="nearest")
+            Z_filtered = savgol_filter(Z_lse, moving_window, 5, mode="nearest")
+        else:
+            X_filtered = uniform_filter1d(X_lse, size=moving_window, mode="reflect")
+            Y_filtered = uniform_filter1d(Y_lse, size=moving_window, mode="reflect")
+            Z_filtered = uniform_filter1d(Z_lse, size=moving_window, mode="reflect")
+    else:
+        X_filtered = X_lse
+        Y_filtered = Y_lse
+        Z_filtered = Z_lse
 
     xf = X_filtered[-1]
     yf = Y_filtered[-1]
