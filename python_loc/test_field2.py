@@ -41,7 +41,7 @@ hist_len_sec = 100000
 total_pos = 0
 total_calc = 0
 
-CONTROL_RATE_HZ = 20
+PID_CONTROL_RATE_HZ = 2
 
 #
 # Welford's online algorithm
@@ -78,16 +78,22 @@ class avg_rate:
 
         return rate
 
-class drone_navigator():
-    # Average update rate
-    avg_rate = avg_rate()
-
+class drone_navigator(threading.Thread):
     # PID tuning files, format is: float float float [float, float]
     pid_tuning_file = "./pid.tuning"
 
     # Default PID config
     default_pid_components = (10, 30, 0.1)
     default_pid_limits = (-100, 100)
+
+    # Thread data
+    data = None
+    lock =  threading.Lock()
+
+    # XXX
+    pitch = 0
+    roll = 0
+    rate = 0.0
 
     def __init__(self, target_x, target_y):
         # Create commands sock
@@ -112,6 +118,8 @@ class drone_navigator():
         self.sock = sock
         self.x_pid = x_pid
         self.y_pid = y_pid
+
+        super().__init__()
 
     def _send_command(self, roll, pitch, yaw, throttle):
         # 4x signed chars
@@ -139,22 +147,38 @@ class drone_navigator():
         pid.tunings = tunings
         pid.output_limits = limits
 
-    def navigate_drone(self, drone_x, drone_y):
-        self._pid_tuning(self.x_pid, self.pid_tuning_file)
-        self._pid_tuning(self.y_pid, self.pid_tuning_file)
+    def run(self):
+        while True:
+            time.sleep(1/PID_CONTROL_RATE_HZ)
 
-        control_x = self.x_pid(drone_x)
-        control_y = self.y_pid(drone_y)
+            self.lock.acquire()
+            data = self.data
+            self.lock.release()
 
-        # Calculate update rate
-        rate = self.avg_rate()
+            if data is None:
+                continue
 
-        # Parrot accepts in signed percentage, i.e. [-100, 100] range
-        roll = int(control_x)
-        pitch = int(control_y)
-        self._send_command(roll, pitch, 0, 0)
+            (x, y) = data
 
-        return roll, pitch, rate
+            self._pid_tuning(self.x_pid, self.pid_tuning_file)
+            self._pid_tuning(self.y_pid, self.pid_tuning_file)
+
+            control_x = self.x_pid(x)
+            control_y = self.y_pid(y)
+
+            # Parrot accepts in signed percentage, i.e. [-100, 100] range
+            roll = int(control_x)
+            pitch = int(control_y)
+            self._send_command(roll, pitch, 0, 0)
+
+            self.roll = roll
+            self.pitch = pitch
+            self.rate = rate
+
+    def navigate_drone(self, x, y):
+        self.lock.acquire()
+        self.data = (x, y)
+        self.lock.release()
 
 def create_dwm_sock():
     # Create sock and bind
@@ -183,7 +207,7 @@ def create_plot_sock():
 
     return sock
 
-def send_plot_data(sock, x, y, z, parrot_alt, ts, nr_anchors, roll, pitch, rate, navigator):
+def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator):
     x_pid = navigator.x_pid
     y_pid = navigator.y_pid
 
@@ -194,41 +218,8 @@ def send_plot_data(sock, x, y, z, parrot_alt, ts, nr_anchors, roll, pitch, rate,
                       x_pid.components[0], x_pid.components[1], x_pid.components[2],
                       y_pid.Kp, y_pid.Ki, y_pid.Kd,
                       y_pid.components[0], y_pid.components[1], y_pid.components[2],
-                      roll, pitch, nr_anchors)
+                      navigator.roll, navigator.pitch, nr_anchors)
     sock.sendto(buf, (cfg.UDP_PLOT_IP, cfg.UDP_PLOT_PORT))
-
-class control_thread(threading.Thread):
-    navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y)
-    plot_sock = create_plot_sock()
-    lock =  threading.Lock()
-    data = None
-
-    def run(self):
-        while True:
-            time.sleep(1/CONTROL_RATE_HZ)
-
-            self.lock.acquire()
-            data = self.data
-            self.lock.release()
-
-            if data is None:
-                continue
-
-            (x, y, z, parrot_alt, nr_anchors) = data
-
-            # PID control
-            roll, pitch, rate = self.navigator.navigate_drone(x, y)
-
-            # Send all math output to the plot
-            ts = time.time()
-            send_plot_data(self.plot_sock, x, y, z, parrot_alt, ts,
-                           nr_anchors, roll, pitch, rate, self.navigator)
-
-
-    def update(self, x, y, z, parrot_alt, nr_anchors):
-        self.lock.acquire()
-        self.data = (x, y, z, parrot_alt, nr_anchors)
-        self.lock.release()
 
 def receive_dwm_location_from_sock(sock):
     # Location header
@@ -278,7 +269,7 @@ def receive_dwm_location_from_sock(sock):
                 'valid': pos_valid,
             },
             'dist': {
-                'dist': float(dist) /1000,
+                'dist': float(dist) / 1000,
                 'addr': addr,
                 'qf': dist_qf
             },
@@ -434,8 +425,11 @@ def calc_pos(X0, loc):
     #res = minimize(func1, X0, method='BFGS', options={'disp': True}, args=(la, lb, lc, ld))
     return res.x
 
-control = control_thread()
-control.start()
+avg_rate = avg_rate()
+navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y)
+plot_sock = create_plot_sock()
+
+navigator.start()
 
 while True:
     print(">> get location from anchors")
@@ -502,5 +496,13 @@ while True:
     print("norm f(pos): ", f_pos_norm, " norm f(X_calc): ", c_pos_norm)
     print("total pos norm: ", total_pos, " total calc norm: ", total_calc)
 
-    # Update control thread
-    control.update(xf, yf, zf, parrot_alt, len(loc['anchors']))
+    # Calculate update rate
+    rate = avg_rate()
+
+    # PID control
+    navigator.navigate_drone(xf, yf)
+
+    # Send all math output to the plot
+    ts = time.time()
+    send_plot_data(plot_sock, xf, yf, zf, parrot_alt, ts, rate,
+                   len(loc['anchors']), navigator)
