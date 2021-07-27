@@ -4,6 +4,7 @@ import math
 import socket
 import struct
 import select
+import threading
 import os
 import re
 
@@ -18,7 +19,6 @@ from scipy.signal import savgol_filter
 #X_f, Y_f, Z_f = wiener(np.array([X_lse, Y_lse, Z_lse]))
 
 import time
-
 
 dwm_sock    = None
 parrot_sock = None
@@ -40,6 +40,8 @@ hist_len_sec = 100000
 
 total_pos = 0
 total_calc = 0
+
+CONTROL_RATE_HZ = 20
 
 #
 # Welford's online algorithm
@@ -154,7 +156,6 @@ class drone_navigator():
 
         return roll, pitch, rate
 
-
 def create_dwm_sock():
     # Create sock and bind
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
@@ -195,6 +196,39 @@ def send_plot_data(sock, x, y, z, parrot_alt, ts, nr_anchors, roll, pitch, rate,
                       y_pid.components[0], y_pid.components[1], y_pid.components[2],
                       roll, pitch, nr_anchors)
     sock.sendto(buf, (cfg.UDP_PLOT_IP, cfg.UDP_PLOT_PORT))
+
+class control_thread(threading.Thread):
+    navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y)
+    plot_sock = create_plot_sock()
+    lock =  threading.Lock()
+    data = None
+
+    def run(self):
+        while True:
+            time.sleep(1/CONTROL_RATE_HZ)
+
+            self.lock.acquire()
+            data = self.data
+            self.lock.release()
+
+            if data is None:
+                continue
+
+            (x, y, z, parrot_alt, nr_anchors) = data
+
+            # PID control
+            roll, pitch, rate = self.navigator.navigate_drone(x, y)
+
+            # Send all math output to the plot
+            ts = time.time()
+            send_plot_data(self.plot_sock, x, y, z, parrot_alt, ts,
+                           nr_anchors, roll, pitch, rate, self.navigator)
+
+
+    def update(self, x, y, z, parrot_alt, nr_anchors):
+        self.lock.acquire()
+        self.data = (x, y, z, parrot_alt, nr_anchors)
+        self.lock.release()
 
 def receive_dwm_location_from_sock(sock):
     # Location header
@@ -400,8 +434,8 @@ def calc_pos(X0, loc):
     #res = minimize(func1, X0, method='BFGS', options={'disp': True}, args=(la, lb, lc, ld))
     return res.x
 
-navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y)
-plot_sock = create_plot_sock()
+control = control_thread()
+control.start()
 
 while True:
     print(">> get location from anchors")
@@ -456,8 +490,6 @@ while True:
     yf = Y_filtered[-1]
     zf = Z_filtered[-1]
 
-    roll, pitch, rate = navigator.navigate_drone(xf, yf)
-
     f_pos = func1(np.array([x, y, z]), loc)
     c_pos = func1([xf, yf, zf], loc)
     print("POS: ", x, y , z, " func(pos): ", f_pos, " C :", xf, yf, zf, " func1(X_calc): ", c_pos)
@@ -470,8 +502,5 @@ while True:
     print("norm f(pos): ", f_pos_norm, " norm f(X_calc): ", c_pos_norm)
     print("total pos norm: ", total_pos, " total calc norm: ", total_calc)
 
-    # Send all math output to the plot
-    ts = time.time()
-    nr_anchors = len(loc['anchors'])
-    send_plot_data(plot_sock, xf, yf, zf, parrot_alt, ts,
-                   nr_anchors, roll, pitch, rate, navigator)
+    # Update control thread
+    control.update(xf, yf, zf, parrot_alt, len(loc['anchors']))
