@@ -11,7 +11,6 @@ import numpy as np
 from scipy.optimize import least_squares
 from scipy.optimize import minimize
 from simple_pid import PID
-import collections
 import config as cfg
 
 from scipy.signal.signaltools import wiener
@@ -28,10 +27,10 @@ plot_sock   = None
 dwm_loc     = None
 parrot_data = None
 
-X_lse = collections.deque()
-Y_lse = collections.deque()
-Z_lse = collections.deque()
-T = collections.deque()
+X_lse = []
+Y_lse = []
+Z_lse = []
+T = []
 
 X_filtered = []
 Y_filtered = []
@@ -133,7 +132,6 @@ class drone_navigator():
                        pid.Kd != tunings[2]:
                         pid.reset()
                     if len(components) >= 5:
-                        print(limits)
                         limits = components[3:5]
 
         pid.tunings = tunings
@@ -443,10 +441,10 @@ while True:
     T.append(ts)
 
     while ts - T[0] > hist_len_sec:
-        X_lse.popleft()
-        Y_lse.popleft()
-        Z_lse.popleft()
-        T.popleft()
+        X_lse.pop(0)
+        Y_lse.pop(0)
+        Z_lse.pop(0)
+        T.pop(0)
 
     if len(X_lse) > 15:
         X_filtered = savgol_filter(X_lse, 15, 5, mode="nearest")
