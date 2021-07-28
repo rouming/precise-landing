@@ -1,12 +1,16 @@
 #!/usr/bin/env python
 
+import time
 import math
 import socket
 import struct
 import select
 import threading
+import enum
 import os
 import re
+
+import dwm1001_ble
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -19,9 +23,9 @@ from scipy.signal.signaltools import wiener
 from scipy.signal import savgol_filter
 #X_f, Y_f, Z_f = wiener(np.array([X_lse, Y_lse, Z_lse]))
 
-import time
 
-dwm_sock    = None
+
+dwm_fd      = None
 parrot_sock = None
 plot_sock   = None
 
@@ -43,6 +47,12 @@ total_pos = 0
 total_calc = 0
 
 PID_CONTROL_RATE_HZ = 2
+
+class dwm_source(enum.Enum):
+    BLE = 0,
+    SOCK = 1,
+
+DWM_DATA_SOURCE = dwm_source.BLE
 
 #
 # Welford's online algorithm
@@ -194,6 +204,23 @@ def create_dwm_sock():
 
     return sock
 
+def create_dwm_ble():
+    manager = dwm1001_ble.DwmDeviceManager()
+    device = dwm1001_ble.DwmDevice(mac_address=cfg.TAG_MAC, manager=manager)
+
+    device.connect()
+    manager.start()
+
+    global dwm_device
+    dwm_device = device
+
+    return device.eventfd
+
+def create_dwm_fd():
+    if DWM_DATA_SOURCE == dwm_source.SOCK:
+        return create_dwm_sock()
+    return create_dwm_ble()
+
 def create_parrot_sock():
     # Create parrot sock
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -282,6 +309,23 @@ def receive_dwm_location_from_sock(sock):
 
     return location
 
+def receive_dwm_location(dwm_fd):
+    if DWM_DATA_SOURCE == dwm_source.SOCK:
+        return receive_dwm_location_from_sock(dwm_fd)
+
+    global dwm_device
+    loc = dwm_device.get_location()
+
+    # FIXME: extend the BLE anchors with coords from config
+    # FIXME: well, this is ugly
+    for anchor in loc['anchors']:
+        anchor_coords = cfg.ANCHORS[anchor['dist']['addr']]
+        anchor['pos']['x'] = anchor_coords[0]
+        anchor['pos']['y'] = anchor_coords[1]
+        anchor['pos']['z'] = anchor_coords[2]
+
+    return loc
+
 def receive_parrot_data_from_sock(sock):
     fmt = "iiffff"
     sz = struct.calcsize(fmt)
@@ -305,10 +349,10 @@ def is_dwm_location_reliable(loc):
     return len(loc['anchors']) >= 3
 
 def get_dwm_location_or_parrot_data():
-    global dwm_sock, parrot_sock, dwm_loc, parrot_data
+    global dwm_fd, parrot_sock, dwm_loc, parrot_data
 
-    if dwm_sock is None:
-        dwm_sock = create_dwm_sock()
+    if dwm_fd is None:
+        dwm_fd = create_dwm_fd()
     if parrot_sock is None:
         parrot_sock = create_parrot_sock()
 
@@ -319,12 +363,12 @@ def get_dwm_location_or_parrot_data():
         # Wait inifinitely if we don't have reliable DWM location
         timeout = 0 if dwm_received else None
 
-        rd, wr, ex = select.select([dwm_sock, parrot_sock], [], [], timeout)
+        rd, wr, ex = select.select([dwm_fd, parrot_sock], [], [], timeout)
         if 0 == len(rd):
             break
 
-        if dwm_sock in rd:
-            loc = receive_dwm_location_from_sock(dwm_sock)
+        if dwm_fd in rd:
+            loc = receive_dwm_location(dwm_fd)
             if is_dwm_location_reliable(loc):
                 dwm_received = True
                 dwm_loc = loc

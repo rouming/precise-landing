@@ -136,7 +136,8 @@ def draw_scene(ax, X, Y, Z, parrot_alt, ts, anch_cnt):
     global first_ts
     global parrot_data
 
-    rects = [[cfg.A, cfg.B, cfg.D, cfg.C]]
+    coords = list(cfg.ANCHORS.values())
+    rects = [[coords[0], coords[1], coords[2], coords[3]]]
 
     if first_ts == 0 and ts != first_ts:
         first_ts = ts

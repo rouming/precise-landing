@@ -17,11 +17,16 @@ UDP_COMMANDS_PORT = 5557
 UDP_PLOT_IP = '127.0.0.1'
 UDP_PLOT_PORT = 5558
 
-# Anchors coords
-A = np.array([0.60,0.60,0.00]) # 2585
-B = np.array([0.60,0.00,0.00]) # 262d
-C = np.array([0.00,0.60,0.00]) # 260f
-D = np.array([0.00,0.00,0.00]) # 28b9
+# Anchors coords (should create a rectangle with anti-clockwise coords)
+ANCHORS = {
+    0x2585: np.array([0.60,0.60,0.00]),
+    0x262d: np.array([0.60,0.00,0.00]),
+    0x28b9: np.array([0.00,0.00,0.00]),
+    0x260f: np.array([0.00,0.60,0.00]),
+}
+
+# Tag
+TAG_MAC = "c7:bc:67:9e:e0:98"
 
 # Landing point in meters, middle of the landing platform
 LANDING_X = 0.60 / 2
