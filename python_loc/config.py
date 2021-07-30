@@ -28,6 +28,9 @@ ANCHORS = {
 # Tag
 TAG_MAC = "c7:bc:67:9e:e0:98"
 
+# Nano33Ble
+NANO33_MAC = "ed:26:b0:24:73:0c"
+
 # Landing point in meters, middle of the landing platform
 LANDING_X = 0.60 / 2
 LANDING_Y = 0.60 / 2

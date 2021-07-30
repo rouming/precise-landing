@@ -11,6 +11,7 @@ import os
 import re
 
 import dwm1001_ble
+import nano33ble
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -26,6 +27,7 @@ from scipy.signal import savgol_filter
 
 
 dwm_fd      = None
+nano33_fd   = None
 parrot_sock = None
 plot_sock   = None
 
@@ -216,6 +218,18 @@ def create_dwm_ble():
 
     return device.eventfd
 
+def create_nano33_ble():
+    manager = nano33ble.Nano33DeviceManager()
+    device = nano33ble.Nano33Device(mac_address=cfg.NANO33_MAC, manager=manager)
+
+    device.connect()
+    manager.start()
+
+    global nano33_device
+    nano33_device = device
+
+    return device.eventfd
+
 def create_dwm_fd():
     if DWM_DATA_SOURCE == dwm_source.SOCK:
         return create_dwm_sock()
@@ -326,6 +340,10 @@ def receive_dwm_location(dwm_fd):
 
     return loc
 
+def receive_nano33_data():
+    global nano33_device
+    return nano33_device.get_data()
+
 def receive_parrot_data_from_sock(sock):
     fmt = "iiffff"
     sz = struct.calcsize(fmt)
@@ -349,10 +367,12 @@ def is_dwm_location_reliable(loc):
     return len(loc['anchors']) >= 3
 
 def get_dwm_location_or_parrot_data():
-    global dwm_fd, parrot_sock, dwm_loc, parrot_data
+    global dwm_fd, nano33_fd, parrot_sock, dwm_loc, parrot_data
 
     if dwm_fd is None:
         dwm_fd = create_dwm_fd()
+    if nano33_fd is None:
+        nano33_fd = create_nano33_ble()
     if parrot_sock is None:
         parrot_sock = create_parrot_sock()
 
@@ -363,7 +383,7 @@ def get_dwm_location_or_parrot_data():
         # Wait inifinitely if we don't have reliable DWM location
         timeout = 0 if dwm_received else None
 
-        rd, wr, ex = select.select([dwm_fd, parrot_sock], [], [], timeout)
+        rd, wr, ex = select.select([dwm_fd, nano33_fd, parrot_sock], [], [], timeout)
         if 0 == len(rd):
             break
 
@@ -374,6 +394,12 @@ def get_dwm_location_or_parrot_data():
                 dwm_loc = loc
         if parrot_sock in rd:
             parrot_data = receive_parrot_data_from_sock(parrot_sock)
+        if nano33_fd in rd:
+            acc, gyro, mag = receive_nano33_data()
+            print("acc = {x=%f y=%f z=%f ts=%d}, gyro = {x=%f y=%f z=%f ts=%d}, mag = {x=%f y=%f z=%f ts=%d}" % \
+              (acc[0], acc[1], acc[2], acc[3],
+               gyro[0], gyro[1], gyro[2], gyro[3],
+               mag[0], mag[1], mag[2], mag[3]))
 
     return dwm_loc, parrot_data
 
