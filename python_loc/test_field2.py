@@ -546,8 +546,6 @@ plot_sock = create_plot_sock()
 
 navigator.start()
 
-from scipy.signal import lfilter, lfilter_zi, filtfilt, butter
-
 def filter_dist(loc):
     for anch in loc["anchors"]:
         addr = anch["dist"]["addr"]
@@ -557,7 +555,7 @@ def filter_dist(loc):
         anch_len_log[addr].add(dist, ts)
 
         # print("dist before filtering %.4f" % dist)
-        if 1:
+        if apply_filter:
             data = anch_len_log[addr].get_log()
             if len(data) > moving_window:
                # filtered_data = uniform_filter1d(data, size=moving_window, mode="reflect")
