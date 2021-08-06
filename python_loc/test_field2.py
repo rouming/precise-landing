@@ -556,7 +556,7 @@ def filter_dist(loc):
         dist = anch["dist"]["dist"]
         anch_len_log[addr].add(dist, ts)
 
-        print("dist before filtering %.4f" % dist)
+        # print("dist before filtering %.4f" % dist)
         if 1:
             data = anch_len_log[addr].get_log()
             if len(data) > moving_window:
@@ -564,7 +564,7 @@ def filter_dist(loc):
                 filtered_data = gaussian_filter1d(data, 3)
                 dist = filtered_data[-1]
                 anch["dist"]["dist"] = dist
-        print("dist after filtering %.4f" % dist)
+        # print("dist after filtering %.4f" % dist)
 
 while True:
     print(">> get location from anchors")
