@@ -23,6 +23,7 @@ from scipy.ndimage.filters import uniform_filter1d
 from scipy.signal.signaltools import wiener
 from scipy.signal import savgol_filter
 #X_f, Y_f, Z_f = wiener(np.array([X_lse, Y_lse, Z_lse]))
+from scipy.ndimage import gaussian_filter1d
 
 
 
@@ -43,7 +44,9 @@ X_filtered = []
 Y_filtered = []
 Z_filtered = []
 
-hist_len_sec = 100000
+moving_window = 15
+
+hist_len_sec = 3
 
 total_pos = 0
 total_calc = 0
@@ -55,7 +58,30 @@ class dwm_source(enum.Enum):
     SOCK = 1,
 
 DWM_DATA_SOURCE = dwm_source.BLE
+#DWM_DATA_SOURCE = dwm_source.SOCK
 
+class len_log:
+    anch = None
+    data = []
+    T = []
+
+    def __init__(self, anch):
+        self.anch = anch
+
+    def add(self, l, ts):
+        self.data.append(l)
+        self.T.append(ts)
+
+        while (len(self.T) > 0) and (ts - self.T[0] > hist_len_sec):
+            self.data.pop(0)
+            self.T.pop(0)
+
+    def get_log(self):
+        return self.data
+
+anch_len_log = {}
+for anch in cfg.ANCHORS.keys():
+    anch_len_log[anch] = len_log(anch)
 #
 # Welford's online algorithm
 # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
@@ -435,7 +461,6 @@ def func1(X, loc):
         anchor_pos = np.array([anch["pos"]["x"], anch["pos"]["y"], anch["pos"]["z"]], dtype=np.float64)
         dist = anch["dist"]["dist"]
         sum += (np.linalg.norm(X - anchor_pos) - dist) ** 2
-
     return sum
 
 # grad is probably wrong, check it later
@@ -521,6 +546,26 @@ plot_sock = create_plot_sock()
 
 navigator.start()
 
+from scipy.signal import lfilter, lfilter_zi, filtfilt, butter
+
+def filter_dist(loc):
+    for anch in loc["anchors"]:
+        addr = anch["dist"]["addr"]
+
+        apply_filter = 1
+        dist = anch["dist"]["dist"]
+        anch_len_log[addr].add(dist, ts)
+
+        print("dist before filtering %.4f" % dist)
+        if 1:
+            data = anch_len_log[addr].get_log()
+            if len(data) > moving_window:
+               # filtered_data = uniform_filter1d(data, size=moving_window, mode="reflect")
+                filtered_data = gaussian_filter1d(data, 3)
+                dist = filtered_data[-1]
+                anch["dist"]["dist"] = dist
+        print("dist after filtering %.4f" % dist)
+
 while True:
     print(">> get location from anchors")
 
@@ -537,6 +582,7 @@ while True:
     parrot_alt = 0
 
     print(">> get distances")
+    filter_dist(loc)
 
     if not assigned:
         X0 = np.abs(np.array([x, y, z]))
