@@ -249,18 +249,37 @@ def create_plot_sock():
 
     return sock
 
-def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator):
+def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator, loc):
     x_pid = navigator.x_pid
     y_pid = navigator.y_pid
 
-    # 1 double, 17 floats, 3 int32
-    buf = struct.pack("dfffffffffffffffffiii",
+    x2585_len = -1.0
+    x262d_len = -1.0
+    x28b9_len = -1.0
+    x260f_len = -1.0
+
+    for anch in loc["anchors"]:
+        dist = anch["dist"]["dist"]
+        addr = anch["dist"]["addr"]
+
+        if addr == 0x2585:
+            x2585_len = dist
+        if addr == 0x262d:
+            x262d_len = dist
+        if addr == 0x28b9:
+            x28b9_len = dist
+        if addr == 0x260f:
+            x260f_len = dist
+
+    # 1 double, 17 floats, 3 int32, 4 floats
+    buf = struct.pack("dfffffffffffffffffiiiffff",
                       ts, x, y, z, parrot_alt, rate,
                       x_pid.Kp, x_pid.Ki, x_pid.Kd,
                       x_pid.components[0], x_pid.components[1], x_pid.components[2],
                       y_pid.Kp, y_pid.Ki, y_pid.Kd,
                       y_pid.components[0], y_pid.components[1], y_pid.components[2],
-                      navigator.roll, navigator.pitch, nr_anchors)
+                      navigator.roll, navigator.pitch, nr_anchors,
+                      x2585_len, x262d_len, x28b9_len, x260f_len)
     sock.sendto(buf, (cfg.UDP_PLOT_IP, cfg.UDP_PLOT_PORT))
 
 def receive_dwm_location_from_sock(sock):
@@ -569,7 +588,8 @@ while True:
 
     f_pos = func1(np.array([x, y, z]), loc)
     c_pos = func1([xf, yf, zf], loc)
-    print("POS: ", x, y , z, " func(pos): ", f_pos, " C :", xf, yf, zf, " func1(X_calc): ", c_pos)
+    print("POS: %.2f %.2f %.2f" % (x, y , z), " C : %.2f %.2f %.2f" % (xf, yf, zf),
+          " func(pos): %.4f" % f_pos, " func1(X_calc): %.4f" % c_pos)
 
     f_pos_norm = np.linalg.norm(f_pos)
     c_pos_norm = np.linalg.norm(c_pos)
@@ -587,5 +607,6 @@ while True:
 
     # Send all math output to the plot
     ts = time.time()
+
     send_plot_data(plot_sock, xf, yf, zf, parrot_alt, ts, rate,
-                   len(loc['anchors']), navigator)
+                   len(loc['anchors']), navigator, loc)
