@@ -23,6 +23,7 @@ from scipy.ndimage.filters import uniform_filter1d
 from scipy.signal.signaltools import wiener
 from scipy.signal import savgol_filter
 #X_f, Y_f, Z_f = wiener(np.array([X_lse, Y_lse, Z_lse]))
+from scipy.ndimage import gaussian_filter1d
 
 
 
@@ -43,7 +44,9 @@ X_filtered = []
 Y_filtered = []
 Z_filtered = []
 
-hist_len_sec = 100000
+moving_window = 15
+
+hist_len_sec = 3
 
 total_pos = 0
 total_calc = 0
@@ -55,7 +58,30 @@ class dwm_source(enum.Enum):
     SOCK = 1,
 
 DWM_DATA_SOURCE = dwm_source.BLE
+#DWM_DATA_SOURCE = dwm_source.SOCK
 
+class len_log:
+    anch = None
+    data = []
+    T = []
+
+    def __init__(self, anch):
+        self.anch = anch
+
+    def add(self, l, ts):
+        self.data.append(l)
+        self.T.append(ts)
+
+        while (len(self.T) > 0) and (ts - self.T[0] > hist_len_sec):
+            self.data.pop(0)
+            self.T.pop(0)
+
+    def get_log(self):
+        return self.data
+
+anch_len_log = {}
+for anch in cfg.ANCHORS.keys():
+    anch_len_log[anch] = len_log(anch)
 #
 # Welford's online algorithm
 # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
@@ -249,18 +275,37 @@ def create_plot_sock():
 
     return sock
 
-def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator):
+def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator, loc):
     x_pid = navigator.x_pid
     y_pid = navigator.y_pid
 
-    # 1 double, 17 floats, 3 int32
-    buf = struct.pack("dfffffffffffffffffiii",
+    x2585_len = -1.0
+    x262d_len = -1.0
+    x28b9_len = -1.0
+    x260f_len = -1.0
+
+    for anch in loc["anchors"]:
+        dist = anch["dist"]["dist"]
+        addr = anch["dist"]["addr"]
+
+        if addr == 0x2585:
+            x2585_len = dist
+        if addr == 0x262d:
+            x262d_len = dist
+        if addr == 0x28b9:
+            x28b9_len = dist
+        if addr == 0x260f:
+            x260f_len = dist
+
+    # 1 double, 17 floats, 3 int32, 4 floats
+    buf = struct.pack("dfffffffffffffffffiiiffff",
                       ts, x, y, z, parrot_alt, rate,
                       x_pid.Kp, x_pid.Ki, x_pid.Kd,
                       x_pid.components[0], x_pid.components[1], x_pid.components[2],
                       y_pid.Kp, y_pid.Ki, y_pid.Kd,
                       y_pid.components[0], y_pid.components[1], y_pid.components[2],
-                      navigator.roll, navigator.pitch, nr_anchors)
+                      navigator.roll, navigator.pitch, nr_anchors,
+                      x2585_len, x262d_len, x28b9_len, x260f_len)
     sock.sendto(buf, (cfg.UDP_PLOT_IP, cfg.UDP_PLOT_PORT))
 
 def receive_dwm_location_from_sock(sock):
@@ -416,7 +461,6 @@ def func1(X, loc):
         anchor_pos = np.array([anch["pos"]["x"], anch["pos"]["y"], anch["pos"]["z"]], dtype=np.float64)
         dist = anch["dist"]["dist"]
         sum += (np.linalg.norm(X - anchor_pos) - dist) ** 2
-
     return sum
 
 # grad is probably wrong, check it later
@@ -502,6 +546,24 @@ plot_sock = create_plot_sock()
 
 navigator.start()
 
+def filter_dist(loc):
+    for anch in loc["anchors"]:
+        addr = anch["dist"]["addr"]
+
+        apply_filter = 1
+        dist = anch["dist"]["dist"]
+        anch_len_log[addr].add(dist, ts)
+
+        # print("dist before filtering %.4f" % dist)
+        if apply_filter:
+            data = anch_len_log[addr].get_log()
+            if len(data) > moving_window:
+               # filtered_data = uniform_filter1d(data, size=moving_window, mode="reflect")
+                filtered_data = gaussian_filter1d(data, 3)
+                dist = filtered_data[-1]
+                anch["dist"]["dist"] = dist
+        # print("dist after filtering %.4f" % dist)
+
 while True:
     print(">> get location from anchors")
 
@@ -518,6 +580,7 @@ while True:
     parrot_alt = 0
 
     print(">> get distances")
+    filter_dist(loc)
 
     if not assigned:
         X0 = np.abs(np.array([x, y, z]))
@@ -569,7 +632,8 @@ while True:
 
     f_pos = func1(np.array([x, y, z]), loc)
     c_pos = func1([xf, yf, zf], loc)
-    print("POS: ", x, y , z, " func(pos): ", f_pos, " C :", xf, yf, zf, " func1(X_calc): ", c_pos)
+    print("POS: %.2f %.2f %.2f" % (x, y , z), " C : %.2f %.2f %.2f" % (xf, yf, zf),
+          " func(pos): %.4f" % f_pos, " func1(X_calc): %.4f" % c_pos)
 
     f_pos_norm = np.linalg.norm(f_pos)
     c_pos_norm = np.linalg.norm(c_pos)
@@ -587,5 +651,6 @@ while True:
 
     # Send all math output to the plot
     ts = time.time()
+
     send_plot_data(plot_sock, xf, yf, zf, parrot_alt, ts, rate,
-                   len(loc['anchors']), navigator)
+                   len(loc['anchors']), navigator, loc)

@@ -23,6 +23,122 @@ PLOT_FILTERED = False
 
 parrot_data = None
 
+class dynamic_len_plot():
+    # Time range in seconds
+    min_x = 0
+    max_x = 10
+
+    # Distange range in meters
+    min_y = -1
+    max_y = 5
+
+    # For cleaning
+    previous_text = None
+
+    def __init__(self, plot_title, x_label, y_label,
+                 lines1_label, lines2_label, lines3_label, lines4_label):
+        # Turn on plot interactive mode
+        plt.ion()
+
+        # Set up plot
+        self.figure, self.ax = plt.subplots()
+
+        # Autoscale on unknown axis and known lims on the other
+        self.ax.set_autoscaley_on(True)
+        self.ax.set(xlim=(self.min_x, self.max_x),
+                    ylim=(self.min_y, self.max_y),
+                    xlabel=x_label,
+                    ylabel=y_label,
+                    title=plot_title)
+
+        # Enable grid
+        self.ax.grid()
+
+        # Create curves on the plot
+        self.lines1, = self.ax.plot([],[], '-', label=lines1_label)
+        self.lines2, = self.ax.plot([],[], '-', label=lines2_label)
+        self.lines3, = self.ax.plot([],[], '-', label=lines3_label)
+        self.lines4, = self.ax.plot([],[], '-', label=lines4_label)
+
+
+        # Set other members
+        self.xdata  = []
+        self.x2585_len = []
+        self.x262d_len = []
+        self.x28b9_len = []
+        self.x260f_len = []
+
+    def _remove_outdated_data(self):
+        width = (self.max_x - self.min_x) * 2
+        first = self.xdata[0]
+        last = self.xdata[-1]
+
+        while first < last - width:
+            self.xdata.pop(0)
+            self.x2585_len.pop(0)
+            self.x262d_len.pop(0)
+            self.x28b9_len.pop(0)
+            self.x260f_len.pop(0)
+
+            first = self.xdata[0]
+
+    def update(self, xdata, x2585_new, x262d_new, x28b9_new, x260f_new):
+        self.xdata.append(xdata)
+
+        # when we do not receive the len from some anchor we just use the last value to plot
+        if x2585_new < 0 and len(self.x2585_len) > 0:
+            x2585_new = self.x2585_len[-1]
+        if x262d_new < 0 and len(self.x262d_len) > 0:
+            x262d_new = self.x262d_len[-1]
+        if x28b9_new < 0 and len(self.x28b9_len) > 0:
+            x28b9_new = self.x28b9_len[-1]
+        if x260f_new < 0 and len(self.x260f_len) > 0:
+            x260f_new = self.x260f_len[-1]
+
+        self.x2585_len.append(x2585_new)
+        self.x262d_len.append(x262d_new)
+        self.x28b9_len.append(x28b9_new)
+        self.x260f_len.append(x260f_new)
+
+        # Clean points which are not visible on the plot
+        self._remove_outdated_data()
+
+        # Following window
+        if xdata >= self.max_x:
+            diff = self.max_x - self.min_x
+            self.max_x = xdata
+            self.min_x = xdata - diff
+            self.ax.set_xlim(self.min_x, self.max_x)
+
+        # Update data (with the new _and_ the old points)
+        self.lines1.set_xdata(self.xdata)
+        self.lines1.set_ydata(self.x2585_len)
+
+        self.lines2.set_xdata(self.xdata)
+        self.lines2.set_ydata(self.x262d_len)
+
+        self.lines3.set_xdata(self.xdata)
+        self.lines3.set_ydata(self.x28b9_len)
+
+        self.lines4.set_xdata(self.xdata)
+        self.lines4.set_ydata(self.x260f_len)
+
+        # Set text
+        if self.previous_text:
+            Artist.remove(self.previous_text)
+        text = "0x2585=%2.2f, 0x262d=%2.2f\n 0x28b9=%2.2f, 0x260f=%2.2f," % \
+               (x2585_new, x262d_new, x28b9_new, x260f_new)
+        self.previous_text = self.ax.text(-0.025, 1.025, text, transform=self.ax.transAxes, \
+                                          bbox=dict(facecolor='green', alpha=0.3))
+
+        # Need both of these in order to rescale
+        self.ax.autoscale_view()
+        self.ax.legend()
+
+        # We need to draw *and* flush
+        self.figure.canvas.draw()
+        self.figure.canvas.flush_events()
+
 class dynamic_plot():
     # Time range in seconds
     min_x = 0
@@ -176,8 +292,8 @@ def recv_math_output(sock):
     # Wait for data
     select.select([sock], [], [], None)
 
-    # 1 double, 17 floats, 3 int32
-    fmt = "dfffffffffffffffffiii"
+    # 1 double, 17 floats, 3 int32, 4 floats
+    fmt = "dfffffffffffffffffiiiffff"
     sz = struct.calcsize(fmt)
 
     # Suck everything, drop all packets except the last one
@@ -210,6 +326,10 @@ if __name__ == '__main__':
     pid_y_plot = dynamic_plot('PID Y', 'Time (s)', 'Drone Y distance (m)',
                               'PID', 'target', cfg.LANDING_Y)
 
+    # create len plots
+    len_plot = dynamic_len_plot("Anchors len", "Time (s)", "Drone distance (m)",
+                                "0x2585", "0x262d", "0x28b9", "0x260f")
+
     # Create 3D plot
     if DRAW_3D_SCENE:
         fig3d = plt.figure()
@@ -229,7 +349,7 @@ if __name__ == '__main__':
     while True:
         (ts, x, y, z, parrot_alt, rate, xKp, xKi, xKd, xp, xi, xd,
          yKp, yKi, yKd, yp, yi, yd, roll, pitch, nr_anchors,
-         dropped) = recv_math_output(sock)
+         x2585_len, x262d_len, x28b9_len, x260f_len, dropped) = recv_math_output(sock)
 
         X.append(x)
         Y.append(y)
@@ -276,6 +396,8 @@ if __name__ == '__main__':
         # Update PID plots
         pid_x_plot.update(ts, x, X_f1, X_f2, pid_x_text)
         pid_y_plot.update(ts, y, Y_f1, Y_f2, pid_y_text)
+
+        len_plot.update(ts, x2585_len, x262d_len, x28b9_len, x260f_len)
 
         # Draw 3d scene
         if DRAW_3D_SCENE:
