@@ -88,8 +88,8 @@ class dynamic_len_plot():
         # when we do not receive the len from some anchor we just use the last value to plot
         if x2585_new < 0 and len(self.x2585_len) > 0:
             x2585_new = self.x2585_len[-1]
-        if x262d_new < 0 and len(self.x2585_len) > 0:
-            x262d_new = self.x2585_len[-1]
+        if x262d_new < 0 and len(self.x262d_len) > 0:
+            x262d_new = self.x262d_len[-1]
         if x28b9_new < 0 and len(self.x28b9_len) > 0:
             x28b9_new = self.x28b9_len[-1]
         if x260f_new < 0 and len(self.x260f_len) > 0:
