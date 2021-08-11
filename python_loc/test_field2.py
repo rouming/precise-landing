@@ -44,9 +44,9 @@ X_filtered = []
 Y_filtered = []
 Z_filtered = []
 
-moving_window = 15
+moving_window = 21
 
-hist_len_sec = 3
+hist_len_sec = 5
 
 total_pos = 0
 total_calc = 0
@@ -61,23 +61,35 @@ DWM_DATA_SOURCE = dwm_source.BLE
 #DWM_DATA_SOURCE = dwm_source.SOCK
 
 class len_log:
-    anch = None
-    data = []
-    T = []
-
     def __init__(self, anch):
         self.anch = anch
+        self.data = []
+        self.T = []
 
-    def add(self, l, ts):
+    def add_to_filter(self, l, ts):
         self.data.append(l)
         self.T.append(ts)
 
+        #print(self.data)
         while (len(self.T) > 0) and (ts - self.T[0] > hist_len_sec):
             self.data.pop(0)
             self.T.pop(0)
 
     def get_log(self):
         return self.data
+
+    def get_last_filtered(self):
+        apply_filter = 1
+        res = self.data[-1]
+
+        if apply_filter == 1 and len(self.data) > moving_window:
+            filtered_data = uniform_filter1d(self.data, size=moving_window, mode="reflect")
+            res = filtered_data[-1]
+        if apply_filter == 2:
+            filtered_data = gaussian_filter1d(self.data, 6)
+            res = filtered_data[-1]
+
+        return res
 
 anch_len_log = {}
 for anch in cfg.ANCHORS.keys():
@@ -434,6 +446,17 @@ def get_dwm_location_or_parrot_data():
 
         if dwm_fd in rd:
             loc = receive_dwm_location(dwm_fd)
+            print("ts:%.6f [%.2f,%.2f,%.2f,%u] " % (loc['ts'], loc['calc_pos']['x'], loc['calc_pos']['y'], loc['calc_pos']['z'],
+                                               loc['calc_pos']['qf']), end='')
+            i = 0
+            for anch in loc['anchors']:
+                print("#%u) a:0x%04x [%.2f,%.2f,%.2f,%.2f] d=%.2f,qf=%u " % (i, anch['dist']['addr'],
+                                                                   anch['pos']['x'], anch['pos']['y'], anch['pos']['z'],
+                                                                   anch['pos']['qf'], anch['dist']['dist'], anch['dist']['qf']), \
+                      end='')
+                i += 1
+            print('')
+
             if is_dwm_location_reliable(loc):
                 dwm_received = True
                 dwm_loc = loc
@@ -476,32 +499,6 @@ def grad_func1(X, la, lb, lc, ld):
           2 * (1 - lc / nc) * (X - C) + 2 * (1 - ld / nd) * (X - D)
 
     return ret
-
-def func2(X, la, lb, lc, ld):
-    ret = np.linalg.norm(X - A) - la + np.linalg.norm(X - B) - lb  + \
-            np.linalg.norm(X - C) - lc + np.linalg.norm(X - D) - ld
-    return ret
-
-def dfunc2(X, la, lb, lc ,ld):
-    ret = 2 * (X - A) + 2 * (X - B) + 2 * (X - C) + 2 * (X - D)
-    return ret
-
-def func(X, la, lb, lc, ld):
-    ret = np.array([np.linalg.norm(X - A) ** 2 - la ** 2,
-                    np.linalg.norm(X - B) ** 2 - lb ** 2,
-                    np.linalg.norm(X - C) ** 2 - lc ** 2,
-                    np.linalg.norm(X - D) ** 2 - ld ** 2])
-    return ret
-
-def jac(X, la, lb, lc, ld):
-    J = np.empty((4, 3))
-    J[0, :] = 2 * (X - A)
-    J[1, :] = 2 * (X - B)
-    J[2, :] = 2 * (X - C)
-    J[3, :] = 2 * (X - D)
-
-    return J
-
 
 assigned = False
 def calc_pos(X0, loc):
@@ -550,19 +547,12 @@ def filter_dist(loc):
     for anch in loc["anchors"]:
         addr = anch["dist"]["addr"]
 
-        apply_filter = 1
         dist = anch["dist"]["dist"]
-        anch_len_log[addr].add(dist, ts)
+        anch_len_log[addr].add_to_filter(dist, ts)
 
-        # print("dist before filtering %.4f" % dist)
-        if apply_filter:
-            data = anch_len_log[addr].get_log()
-            if len(data) > moving_window:
-               # filtered_data = uniform_filter1d(data, size=moving_window, mode="reflect")
-                filtered_data = gaussian_filter1d(data, 3)
-                dist = filtered_data[-1]
-                anch["dist"]["dist"] = dist
-        # print("dist after filtering %.4f" % dist)
+        print("dist before filtering %.4f" % dist)
+        anch["dist"]["dist"] = anch_len_log[addr].get_last_filtered()
+        print("dist after filtering %.4f" % anch["dist"]["dist"])
 
 while True:
     print(">> get location from anchors")
