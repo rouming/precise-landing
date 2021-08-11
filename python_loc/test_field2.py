@@ -70,6 +70,12 @@ class len_log:
         self.data.append(l)
         self.T.append(ts)
 
+        apply_filter = 2
+        if apply_filter == 1 and len(self.data) > moving_window:
+            self.data = list(uniform_filter1d(self.data, size=moving_window, mode="reflect"))
+        if apply_filter == 2:
+            self.data = list(gaussian_filter1d(self.data, 6))
+
         #print(self.data)
         while (len(self.T) > 0) and (ts - self.T[0] > hist_len_sec):
             self.data.pop(0)
@@ -81,13 +87,6 @@ class len_log:
     def get_last_filtered(self):
         apply_filter = 1
         res = self.data[-1]
-
-        if apply_filter == 1 and len(self.data) > moving_window:
-            filtered_data = uniform_filter1d(self.data, size=moving_window, mode="reflect")
-            res = filtered_data[-1]
-        if apply_filter == 2:
-            filtered_data = gaussian_filter1d(self.data, 6)
-            res = filtered_data[-1]
 
         return res
 
