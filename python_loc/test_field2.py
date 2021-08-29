@@ -57,7 +57,7 @@ class dwm_source(enum.Enum):
     BLE = 0,
     SOCK = 1,
 
-DWM_DATA_SOURCE = dwm_source.BLE
+DWM_DATA_SOURCE = dwm_source.SOCK
 #DWM_DATA_SOURCE = dwm_source.SOCK
 
 class len_log:
@@ -542,6 +542,7 @@ plot_sock = create_plot_sock()
 
 navigator.start()
 
+from kalman import kalman_6
 def filter_dist(loc):
     for anch in loc["anchors"]:
         addr = anch["dist"]["addr"]
@@ -576,6 +577,8 @@ while True:
         assigned = True
 
     X_calc = calc_pos(X0, loc)
+
+    x = kalman_6(loc)
 
     X0 = X_calc
     X_lse.append(X_calc[0])
