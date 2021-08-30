@@ -10,6 +10,8 @@ import enum
 import os
 import re
 
+import filterpy.kalman
+
 import dwm1001_ble
 import nano33ble
 
@@ -319,6 +321,8 @@ def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator, l
                       x2585_len, x262d_len, x28b9_len, x260f_len)
     sock.sendto(buf, (cfg.UDP_PLOT_IP, cfg.UDP_PLOT_PORT))
 
+ekf6 = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
+ekf6.x = np.array([[1],[0],[1], [0],[1], [0]])
 def receive_dwm_location_from_sock(sock):
     # Location header
     fmt = "iiihhiii"
@@ -542,7 +546,7 @@ plot_sock = create_plot_sock()
 
 navigator.start()
 
-from kalman import kalman_6
+from kalman import ekf_6
 def filter_dist(loc):
     for anch in loc["anchors"]:
         addr = anch["dist"]["addr"]
@@ -576,9 +580,10 @@ while True:
         X0 = np.abs(np.array([x, y, z]))
         assigned = True
 
-    X_calc = calc_pos(X0, loc)
+    #X_calc = calc_pos(X0, loc)
 
-    x = kalman_6(loc)
+    X_kalman = ekf_6(ekf6, loc)
+    X_calc = X_kalman
 
     X0 = X_calc
     X_lse.append(X_calc[0])
@@ -597,7 +602,7 @@ while True:
         Z_lse.pop(0)
         T.pop(0)
 
-    apply_filter = 2
+    apply_filter = 0
 
     if apply_filter:
         moving_window = 15
