@@ -60,7 +60,7 @@ class dwm_source(enum.Enum):
     BLE = 0,
     SOCK = 1,
 
-DWM_DATA_SOURCE = dwm_source.SOCK
+DWM_DATA_SOURCE = dwm_source.BLE
 #DWM_DATA_SOURCE = dwm_source.SOCK
 
 class len_log:
@@ -426,6 +426,7 @@ def receive_parrot_data_from_sock(sock):
 def is_dwm_location_reliable(loc):
     return len(loc['anchors']) >= 3
 
+import time
 def get_dwm_location_or_parrot_data():
     global dwm_fd, nano33_fd, parrot_sock, dwm_loc, parrot_data, nano_data
 
@@ -466,6 +467,7 @@ def get_dwm_location_or_parrot_data():
         if parrot_sock in rd:
             parrot_data = receive_parrot_data_from_sock(parrot_sock)
         if nano33_fd in rd:
+            nano_data = {}
             acc, gyro, mag = receive_nano33_data()
             print("acc = {x=%f y=%f z=%f ts=%d}, gyro = {x=%f y=%f z=%f ts=%d}, mag = {x=%f y=%f z=%f ts=%d}" % \
               (acc[0], acc[1], acc[2], acc[3],
@@ -475,6 +477,7 @@ def get_dwm_location_or_parrot_data():
             nano_data["acc"] = acc # ax, ay, az, ts
             nano_data["gyro"] = gyro
             nano_data["mag"] = mag
+            nano_data["ts"] = time.time()
 
     return dwm_loc, parrot_data, nano_data
 
@@ -594,13 +597,13 @@ while True:
 
     #X_calc = calc_pos(X0, loc)
 
-    # X_kalman = ekf_6(ekf6, loc)
-    X_kalman = ekf_9(ekf9, loc, nano_data)
+    X_kalman = ekf_6(ekf6, loc)
+    #X_kalman = ekf_9(ekf9, loc, nano_data)
     if X_kalman == None:
         continue
 
     X_calc = X_kalman
-    print(ekf9.y)
+    # print(ekf6.y)
     X0 = X_calc
     X_lse.append(X_calc[0])
     Y_lse.append(X_calc[1])

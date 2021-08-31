@@ -14,9 +14,9 @@ from scipy.signal import savgol_filter
 
 import config as cfg
 
-X_LIM = 7
-Y_LIM = 7
-Z_LIM = 7
+X_LIM = 3
+Y_LIM = 3
+Z_LIM = 3
 
 DRAW_3D_SCENE = True
 PLOT_FILTERED = False
