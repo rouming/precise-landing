@@ -36,6 +36,7 @@ plot_sock   = None
 
 dwm_loc     = None
 parrot_data = None
+nano_data   = None
 
 X_lse = []
 Y_lse = []
@@ -321,8 +322,7 @@ def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator, l
                       x2585_len, x262d_len, x28b9_len, x260f_len)
     sock.sendto(buf, (cfg.UDP_PLOT_IP, cfg.UDP_PLOT_PORT))
 
-ekf6 = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
-ekf6.x = np.array([[1],[0],[1], [0],[1], [0]])
+
 def receive_dwm_location_from_sock(sock):
     # Location header
     fmt = "iiihhiii"
@@ -427,7 +427,7 @@ def is_dwm_location_reliable(loc):
     return len(loc['anchors']) >= 3
 
 def get_dwm_location_or_parrot_data():
-    global dwm_fd, nano33_fd, parrot_sock, dwm_loc, parrot_data
+    global dwm_fd, nano33_fd, parrot_sock, dwm_loc, parrot_data, nano_data
 
     if dwm_fd is None:
         dwm_fd = create_dwm_fd()
@@ -472,7 +472,11 @@ def get_dwm_location_or_parrot_data():
                gyro[0], gyro[1], gyro[2], gyro[3],
                mag[0], mag[1], mag[2], mag[3]))
 
-    return dwm_loc, parrot_data
+            nano_data["acc"] = acc # ax, ay, az, ts
+            nano_data["gyro"] = gyro
+            nano_data["mag"] = mag
+
+    return dwm_loc, parrot_data, nano_data
 
 def find_anchor_by_addr(location, addr):
     for anchor in location['anchors']:
@@ -547,6 +551,14 @@ plot_sock = create_plot_sock()
 navigator.start()
 
 from kalman import ekf_6
+from kalman import ekf_9
+
+ekf6 = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
+ekf6.x = np.array([[1],[0],[1], [0],[1], [0]])
+
+ekf9 = filterpy.kalman.ExtendedKalmanFilter(dim_x=9, dim_z=4, dim_u=9)
+ekf9.x = np.array([[1], [0], [0], [1], [0], [0], [1], [0], [0]])
+
 def filter_dist(loc):
     for anch in loc["anchors"]:
         addr = anch["dist"]["addr"]
@@ -561,7 +573,7 @@ def filter_dist(loc):
 while True:
     print(">> get location from anchors")
 
-    loc, parrot_data = get_dwm_location_or_parrot_data()
+    loc, parrot_data, nano_data = get_dwm_location_or_parrot_data()
 
     print(">> got calculated position from the engine")
 
@@ -582,9 +594,13 @@ while True:
 
     #X_calc = calc_pos(X0, loc)
 
-    X_kalman = ekf_6(ekf6, loc)
-    X_calc = X_kalman
+    # X_kalman = ekf_6(ekf6, loc)
+    X_kalman = ekf_9(ekf9, loc, nano_data)
+    if X_kalman == None:
+        continue
 
+    X_calc = X_kalman
+    print(ekf9.y)
     X0 = X_calc
     X_lse.append(X_calc[0])
     Y_lse.append(X_calc[1])
