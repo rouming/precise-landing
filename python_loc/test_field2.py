@@ -557,7 +557,7 @@ from kalman import ekf_6
 from kalman import ekf_9
 
 ekf6 = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
-ekf6.x = np.array([[1],[0],[1], [0],[1], [0]])
+ekf6.x = np.array([[1], [0], [1], [0], [1], [0]])
 
 ekf9 = filterpy.kalman.ExtendedKalmanFilter(dim_x=9, dim_z=4, dim_u=9)
 ekf9.x = np.array([[1], [0], [0], [1], [0], [0], [1], [0], [0]])
