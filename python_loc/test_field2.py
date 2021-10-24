@@ -467,13 +467,14 @@ def get_dwm_location_or_parrot_data():
         if parrot_sock in rd:
             parrot_data = receive_parrot_data_from_sock(parrot_sock)
         if nano33_fd in rd:
-            nano_data = {}
-            acc, gyro, mag = receive_nano33_data()
-            print("acc = {x=%f y=%f z=%f ts=%d}, gyro = {x=%f y=%f z=%f ts=%d}, mag = {x=%f y=%f z=%f ts=%d}" % \
-              (acc[0], acc[1], acc[2], acc[3],
-               gyro[0], gyro[1], gyro[2], gyro[3],
-               mag[0], mag[1], mag[2], mag[3]))
+            acc, attitude = receive_nano33_data()
 
+            print("acc = {x=%.3f y=%.3f z=%.3f}, attitude = {yaw=%.3f pitch=%.3f roll=%.3f} ts=%d" % \
+                  (acc[0], acc[1], acc[2],
+                   attitude[0], attitude[1], attitude[2],
+                   acc[3]))
+
+            nano_data = {}
             nano_data["acc"] = acc # ax, ay, az, ts
             nano_data["gyro"] = gyro
             nano_data["mag"] = mag

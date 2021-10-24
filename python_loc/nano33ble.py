@@ -1,6 +1,5 @@
 #!/usr/bin/python3
 
-import dbus
 import gatt
 import struct
 import threading
@@ -8,10 +7,7 @@ import time
 import eventfd
 
 NANO_SERVICE_UUID = '590d65c7-3a0a-4023-a05a-6aaf2f22441c'
-
-NANO_MAG_ID  = '00000001-0000-1000-8000-00805f9b34fb'
-NANO_GYRO_ID = '00000002-0000-1000-8000-00805f9b34fb'
-NANO_ACC_ID  = '00000003-0000-1000-8000-00805f9b34fb'
+NANO_DATA_ID  = '00000001-0000-1000-8000-00805f9b34fb'
 
 class ManagerThread(threading.Thread):
     def __init__(self, manager):
@@ -42,9 +38,8 @@ class Nano33DeviceManager(gatt.DeviceManager):
         self.thread.join()
 
 class Nano33Device(gatt.Device):
-    mag  = [0.0, 0.0, 0.0, 0]
-    acc  = [0.0, 0.0, 0.0, 0]
-    gyro = [0.0, 0.0, 0.0, 0]
+    acc      = [0.0, 0.0, 0.0, 0]
+    attitude = [0.0, 0.0, 0.0, 0]
 
     def __init__(self, mac_address, manager, callback=None):
         self.lock = threading.Lock()
@@ -60,24 +55,18 @@ class Nano33Device(gatt.Device):
             if s.uuid == NANO_SERVICE_UUID)
 
         for ch in device_information_service.characteristics:
-            if ch.uuid == NANO_ACC_ID:
-                ch.enable_notifications()
-            elif ch.uuid == NANO_GYRO_ID:
-                ch.enable_notifications()
-            elif ch.uuid == NANO_MAG_ID:
+            if ch.uuid == NANO_DATA_ID:
                 ch.enable_notifications()
 
     def characteristic_value_updated(self, characteristic, value):
-        fmt = '<fffi'
-        x, y, z, ts = struct.unpack(fmt, value)
+        fmt = '<ffffffi'
+
+        x, y, z, yaw, pitch, roll, ts = struct.unpack(fmt, value)
 
         self.lock.acquire()
-        if characteristic.uuid == NANO_ACC_ID:
-            self.acc = [x, y, z, ts]
-        elif characteristic.uuid == NANO_GYRO_ID:
-            self.gyro = [x, y, z, ts]
-        elif characteristic.uuid == NANO_MAG_ID:
-            self.mag = [x, y, z, ts]
+        if characteristic.uuid == NANO_DATA_ID:
+            self.acc      = [x, y, z, ts]
+            self.attitude = [yaw, pitch, roll, ts]
         self.eventfd.set()
         self.lock.release()
         if self.callback:
@@ -86,11 +75,10 @@ class Nano33Device(gatt.Device):
     def get_data(self):
         self.lock.acquire()
         self.eventfd.clear()
-        mag = self.mag
-        gyro = self.gyro
         acc = self.acc
+        attitude = self.attitude
         self.lock.release()
-        return acc, gyro, mag
+        return acc, attitude
 
 import select
 import argparse
@@ -115,14 +103,13 @@ if __name__ == '__main__':
 
     while True:
         r, w, e = select.select([device.eventfd], [], [])
-        acc, gyro, mag = device.get_data()
+        acc, attitude = device.get_data()
 
         now = time.time()
         rate = 1 / (now - ts)
         ts = now
 
-        print("acc = {x=%f y=%f z=%f ts=%d}, gyro = {x=%f y=%f z=%f ts=%d}, mag = {x=%f y=%f z=%f ts=%d}, rate %f" % \
-              (acc[0], acc[1], acc[2], acc[3],
-               gyro[0], gyro[1], gyro[2], gyro[3],
-               mag[0], mag[1], mag[2], mag[3],
-               rate))
+        print("acc = {x=%.3f y=%.3f z=%.3f}, attitude = {yaw=%.3f pitch=%.3f roll=%.3f} ts=%d rate=%.0f" % \
+              (acc[0], acc[1], acc[2],
+               attitude[0], attitude[1], attitude[2],
+               acc[3], rate))
