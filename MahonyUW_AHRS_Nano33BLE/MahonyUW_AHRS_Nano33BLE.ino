@@ -31,6 +31,42 @@
 #include <SPI.h>
 #include <SparkFunLSM9DS1.h>
 
+#include "Arduino.h"
+/* For the bluetooth funcionality */
+#include <ArduinoBLE.h>
+
+// #define USE_SERIAL
+
+struct data
+{
+	float acc_x;
+	float acc_y;
+	float acc_z;
+	float yaw;
+	float pitch;
+	float roll;
+	uint32_t ts;
+};
+
+
+/* Device name which can be scene in BLE scanning software. */
+#define BLE_DEVICE_NAME                "Arduino Nano 33 BLE"
+/* Local name which should pop up when scanning for BLE devices. */
+#define BLE_LOCAL_NAME                "Arduino Nano 33 BLE Sensors"
+
+/*
+ * Declares the BLEService and characteristics we will need for the BLE
+ * transfer. The UUID was randomly generated using one of the many online
+ * tools that exist. It was chosen to use BLECharacteristic instead of
+ * BLEFloatCharacteristic (and other characteristic types) as it is hard
+ * to view non-string data in most BLE scanning software. Strings can be
+ * viewed easiler enough. In an actual application you might want to
+ * transfer specific data types directly.
+ */
+BLEService BLESensors("590d65c7-3a0a-4023-a05a-6aaf2f22441c");
+BLECharacteristic ble_data("0001", BLERead | BLENotify | BLEBroadcast,
+			   sizeof(struct data));
+
 //////////////////////////
 // LSM9DS1 Library Init //
 //////////////////////////
@@ -77,28 +113,66 @@ float declination = -14.84;
 unsigned long now = 0, last = 0; //micros() timers for AHRS loop
 float deltat = 0;  //loop time in seconds
 
-#define PRINT_SPEED 300 // ms between angle prints
-unsigned long lastPrint = 0; // Keep track of print time
-
 // Vector to hold quaternion
 static float q[4] = {1.0, 0.0, 0.0, 0.0};
 static float yaw, pitch, roll; //Euler angle output
 
+static void imuTransformVectorBodyToEarth(float &ax, float &ay, float &az);
 
 void setup()
 {
-  Serial.begin(115200);
-  while (!Serial); //wait for connection
-  Serial.println();
-  Serial.println("LSM9DS1 AHRS starting");
+     int i;
 
-  Wire.begin();
+     for (i = 5; i > 0; i--) {
+            digitalWrite(LED_BUILTIN, HIGH);   // turn the LED on (HIGH is the voltage level)
+            delay(100);                       // wait for a second
+            digitalWrite(LED_BUILTIN, LOW);    // turn the LED off by making the voltage LOW
+            delay(100);
+     }
 
-  if (imu.begin() == false) // with no arguments, this uses default addresses (AG:0x6B, M:0x1E) and i2c port (Wire).
-  {
-    Serial.println(F("LSM9DS1 not detected"));
-    while (1);
-  }
+#ifdef USE_SERIAL
+     Serial.begin(115200);
+     while (!Serial); //wait for connection
+     Serial.println();
+     Serial.println("LSM9DS1 AHRS starting");
+#endif
+
+     Wire1.begin();
+
+     if (imu.begin(LSM9DS1_AG_ADDR(1), LSM9DS1_M_ADDR(1), Wire1) == false) {
+#ifdef USE_SERIAL
+	     Serial.println(F("LSM9DS1 not detected"));
+#endif
+	     while (1);
+     }
+
+
+    /* BLE Setup. For information, search for the many ArduinoBLE examples.*/
+    if (!BLE.begin())  {
+        while (1) {
+            digitalWrite(LED_BUILTIN, HIGH);   // turn the LED on (HIGH is the voltage level)
+            delay(20);                       // wait for a second
+            digitalWrite(LED_BUILTIN, LOW);    // turn the LED off by making the voltage LOW
+            delay(20);
+       }
+    }
+    else {
+        BLE.setDeviceName(BLE_DEVICE_NAME);
+        BLE.setLocalName(BLE_LOCAL_NAME);
+        BLE.setAdvertisedService(BLESensors);
+        /* A seperate characteristic is used for each sensor data type. */
+        BLESensors.addCharacteristic(ble_data);
+
+        BLE.addService(BLESensors);
+        BLE.advertise();
+
+#ifdef USE_SERIAL
+        String address = BLE.address();
+        Serial.print("Local MAC address is: ");
+        Serial.println(address);
+#endif
+    }
+
 }
 
 void loop()
@@ -106,6 +180,13 @@ void loop()
   static char updated = 0; //flags for sensor updates
   static int loop_counter=0; //sample & update loop counter
   static float Gxyz[3], Axyz[3], Mxyz[3]; //centered and scaled gyro/accel/mag data
+
+  BLEDevice central = BLE.central();
+
+  if (!central)
+	  return;
+  if (!central.connected())
+	  return;
 
   // Update the sensor values whenever new data is available
   if ( imu.accelAvailable() ) {
@@ -132,7 +213,7 @@ void loop()
 
     Axyz[0] = -Axyz[0]; //fix accel/gyro handedness
     Gxyz[0] = -Gxyz[0]; //must be done after offsets & scales applied to raw data
-   
+
     now = micros();
     deltat = (now - last) * 1.0e-6; //seconds since last update
     last = now;
@@ -140,49 +221,84 @@ void loop()
     MahonyQuaternionUpdate(Axyz[0], Axyz[1], Axyz[2], Gxyz[0], Gxyz[1], Gxyz[2],
                            Mxyz[0], Mxyz[1], Mxyz[2], deltat);
 
-    if (millis() - lastPrint > PRINT_SPEED) {
+    // Define Tait-Bryan angles.
+    // Standard sensor orientation : X magnetic North, Y West, Z Up (NWU)
+    // this code corrects for magnetic declination.
+    // Pitch is angle between sensor x-axis and Earth ground plane, toward the
+    // Earth is positive, up toward the sky is negative. Roll is angle between
+    // sensor y-axis and Earth ground plane, y-axis up is positive roll.
+    // Tait-Bryan angles as well as Euler angles are
+    // non-commutative; that is, the get the correct orientation the rotations
+    // must be applied in the correct order.
+    //
+    // http://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
+    // which has additional links.
+    roll  = atan2((q[0] * q[1] + q[2] * q[3]), 0.5 - (q[1] * q[1] + q[2] * q[2]));
+    pitch = asin(2.0 * (q[0] * q[2] - q[1] * q[3]));
+    yaw   = atan2((q[1] * q[2] + q[0] * q[3]), 0.5 - ( q[2] * q[2] + q[3] * q[3]));
+    // to degrees
+    yaw   *= 180.0 / PI;
+    pitch *= 180.0 / PI;
+    roll *= 180.0 / PI;
 
-      // Define Tait-Bryan angles.
-      // Standard sensor orientation : X magnetic North, Y West, Z Up (NWU)
-      // this code corrects for magnetic declination.
-      // Pitch is angle between sensor x-axis and Earth ground plane, toward the
-      // Earth is positive, up toward the sky is negative. Roll is angle between
-      // sensor y-axis and Earth ground plane, y-axis up is positive roll.
-      // Tait-Bryan angles as well as Euler angles are
-      // non-commutative; that is, the get the correct orientation the rotations
-      // must be applied in the correct order.
-      //
-      // http://en.wikipedia.org/wiki/Conversion_between_quaternions_and_Euler_angles
-      // which has additional links.
-      roll  = atan2((q[0] * q[1] + q[2] * q[3]), 0.5 - (q[1] * q[1] + q[2] * q[2]));
-      pitch = asin(2.0 * (q[0] * q[2] - q[1] * q[3]));
-      yaw   = atan2((q[1] * q[2] + q[0] * q[3]), 0.5 - ( q[2] * q[2] + q[3] * q[3]));
-      // to degrees
-      yaw   *= 180.0 / PI;
-      pitch *= 180.0 / PI;
-      roll *= 180.0 / PI;
+    // http://www.ngdc.noaa.gov/geomag-web/#declination
+    //conventional nav, yaw increases CW from North, corrected for local magnetic declination
 
-      // http://www.ngdc.noaa.gov/geomag-web/#declination
-      //conventional nav, yaw increases CW from North, corrected for local magnetic declination
+    yaw = -(yaw + declination);
+    if (yaw < 0) yaw += 360.0;
+    if (yaw >= 360.0) yaw -= 360.0;
 
-      yaw = -(yaw + declination);
-      if (yaw < 0) yaw += 360.0;
-      if (yaw >= 360.0) yaw -= 360.0;
+    /* Back to radians */
+    yaw /= 180.0 / PI;
+    pitch /= 180.0 / PI;
+    roll /= 180.0 / PI;
 
-      Serial.print("ypr ");
-      Serial.print(yaw, 0);
-      Serial.print(", ");
-      Serial.print(pitch, 0);
-      Serial.print(", ");
-      Serial.print(roll, 0);
-//      Serial.print(", ");  //prints 24 in 300 ms (80 Hz) with 16 MHz ATmega328
-//      Serial.print(loop_counter);  //sample & update loops per print interval
-      loop_counter = 0;
-      Serial.println();
-      lastPrint = millis(); // Update lastPrint time
-    }
+#ifdef USE_SERIAL
+    Serial.print("ypr ");
+    Serial.print(yaw, 0);
+    Serial.print(", ");
+    Serial.print(pitch, 0);
+    Serial.print(", ");
+    Serial.print(roll, 0);
+//    Serial.print(", ");  //prints 24 in 300 ms (80 Hz) with 16 MHz ATmega328
+//    Serial.print(loop_counter);  //sample & update loops per print interval
+    loop_counter = 0;
+    Serial.print(", ");
+#endif
+
+    float acc_x = imu.calcAccel(imu.ax);
+    float acc_y = imu.calcAccel(imu.ay);
+    float acc_z = imu.calcAccel(imu.az);
+
+    /* fix accel handedness */
+    acc_x = -acc_x;
+
+    imuTransformVectorBodyToEarth(acc_x, acc_y, acc_z);
+
+    /* compensate 1g */
+    acc_z -= 1;
+
+#ifdef USE_SERIAL
+    Serial.print("acc ");
+    Serial.print(acc_x, 2);
+    Serial.print(", ");
+    Serial.print(acc_y, 2);
+    Serial.print(", ");
+    Serial.print(acc_z, 2);
+    Serial.println();
+#endif
+
+    struct data data = {
+	    .acc_x  = acc_x,
+	    .acc_y  = acc_y,
+	    .acc_z  = acc_z,
+	    .yaw    = yaw,
+	    .pitch  = pitch,
+	    .roll   = roll,
+	    .ts     = now,
+    };
+    ble_data.writeValue(&data, sizeof(data), false);
   }
-  // consider averaging a few headings for better results
 }
 
 // vector math
@@ -198,6 +314,55 @@ void vector_normalize(float a[3])
   a[1] /= mag;
   a[2] /= mag;
 }
+
+
+
+
+static float rMat[3][3];
+
+static void imuComputeRotationMatrix(void)
+{
+    float q0 = q[0], q1 = q[1], q2 = q[2], q3 = q[3];
+
+    float q1q1 = sq(q1);
+    float q2q2 = sq(q2);
+    float q3q3 = sq(q3);
+
+    float q0q1 = q0 * q1;
+    float q0q2 = q0 * q2;
+    float q0q3 = q0 * q3;
+    float q1q2 = q1 * q2;
+    float q1q3 = q1 * q3;
+    float q2q3 = q2 * q3;
+
+    rMat[0][0] = 1.0f - 2.0f * q2q2 - 2.0f * q3q3;
+    rMat[0][1] = 2.0f * (q1q2 + -q0q3);
+    rMat[0][2] = 2.0f * (q1q3 - -q0q2);
+
+    rMat[1][0] = 2.0f * (q1q2 - -q0q3);
+    rMat[1][1] = 1.0f - 2.0f * q1q1 - 2.0f * q3q3;
+    rMat[1][2] = 2.0f * (q2q3 + -q0q1);
+
+    rMat[2][0] = 2.0f * (q1q3 + -q0q2);
+    rMat[2][1] = 2.0f * (q2q3 - -q0q1);
+    rMat[2][2] = 1.0f - 2.0f * q1q1 - 2.0f * q2q2;
+
+}
+
+
+static void imuTransformVectorBodyToEarth(float &ax, float &ay, float &az)
+{
+    /* From body frame to earth frame */
+    float x = rMat[0][0] * ax + rMat[0][1] * ay + rMat[0][2] * az;
+    float y = rMat[1][0] * ax + rMat[1][1] * ay + rMat[1][2] * az;
+    float z = rMat[2][0] * ax + rMat[2][1] * ay + rMat[2][2] * az;
+
+    ax = x;
+    ay = y;
+    az = z;
+}
+
+
 
 // function to subtract offsets and apply scale/correction matrices to IMU data
 
@@ -326,4 +491,9 @@ void MahonyQuaternionUpdate(float ax, float ay, float az, float gx, float gy, fl
   q[1] = q2 * norm;
   q[2] = q3 * norm;
   q[3] = q4 * norm;
+
+  // Pre-compute rotation matrix from quaternion
+  imuComputeRotationMatrix();
+
+  
 }
