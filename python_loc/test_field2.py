@@ -10,6 +10,8 @@ import enum
 import os
 import re
 
+import filterpy.kalman
+
 import dwm1001_ble
 import nano33ble
 
@@ -34,6 +36,7 @@ plot_sock   = None
 
 dwm_loc     = None
 parrot_data = None
+nano_data   = None
 
 X_lse = []
 Y_lse = []
@@ -319,6 +322,7 @@ def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator, l
                       x2585_len, x262d_len, x28b9_len, x260f_len)
     sock.sendto(buf, (cfg.UDP_PLOT_IP, cfg.UDP_PLOT_PORT))
 
+
 def receive_dwm_location_from_sock(sock):
     # Location header
     fmt = "iiihhiii"
@@ -422,8 +426,9 @@ def receive_parrot_data_from_sock(sock):
 def is_dwm_location_reliable(loc):
     return len(loc['anchors']) >= 3
 
+import time
 def get_dwm_location_or_parrot_data():
-    global dwm_fd, nano33_fd, parrot_sock, dwm_loc, parrot_data
+    global dwm_fd, nano33_fd, parrot_sock, dwm_loc, parrot_data, nano_data
 
     if dwm_fd is None:
         dwm_fd = create_dwm_fd()
@@ -462,13 +467,20 @@ def get_dwm_location_or_parrot_data():
         if parrot_sock in rd:
             parrot_data = receive_parrot_data_from_sock(parrot_sock)
         if nano33_fd in rd:
-            acc, gyro, mag = receive_nano33_data()
-            print("acc = {x=%f y=%f z=%f ts=%d}, gyro = {x=%f y=%f z=%f ts=%d}, mag = {x=%f y=%f z=%f ts=%d}" % \
-              (acc[0], acc[1], acc[2], acc[3],
-               gyro[0], gyro[1], gyro[2], gyro[3],
-               mag[0], mag[1], mag[2], mag[3]))
+            acc, attitude = receive_nano33_data()
 
-    return dwm_loc, parrot_data
+            print("acc = {x=%.3f y=%.3f z=%.3f}, attitude = {yaw=%.3f pitch=%.3f roll=%.3f} ts=%d" % \
+                  (acc[0], acc[1], acc[2],
+                   attitude[0], attitude[1], attitude[2],
+                   acc[3]))
+
+            nano_data = {}
+            nano_data["acc"] = acc # ax, ay, az, ts
+            nano_data["gyro"] = gyro
+            nano_data["mag"] = mag
+            nano_data["ts"] = time.time()
+
+    return dwm_loc, parrot_data, nano_data
 
 def find_anchor_by_addr(location, addr):
     for anchor in location['anchors']:
@@ -542,6 +554,15 @@ plot_sock = create_plot_sock()
 
 navigator.start()
 
+from kalman import ekf_6
+from kalman import ekf_9
+
+ekf6 = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
+ekf6.x = np.array([[1], [0], [1], [0], [1], [0]])
+
+ekf9 = filterpy.kalman.ExtendedKalmanFilter(dim_x=9, dim_z=4, dim_u=9)
+ekf9.x = np.array([[1], [0], [0], [1], [0], [0], [1], [0], [0]])
+
 def filter_dist(loc):
     for anch in loc["anchors"]:
         addr = anch["dist"]["addr"]
@@ -556,7 +577,7 @@ def filter_dist(loc):
 while True:
     print(">> get location from anchors")
 
-    loc, parrot_data = get_dwm_location_or_parrot_data()
+    loc, parrot_data, nano_data = get_dwm_location_or_parrot_data()
 
     print(">> got calculated position from the engine")
 
@@ -575,8 +596,15 @@ while True:
         X0 = np.abs(np.array([x, y, z]))
         assigned = True
 
-    X_calc = calc_pos(X0, loc)
+    #X_calc = calc_pos(X0, loc)
 
+    X_kalman = ekf_6(ekf6, loc)
+    #X_kalman = ekf_9(ekf9, loc, nano_data)
+    if X_kalman == None:
+        continue
+
+    X_calc = X_kalman
+    # print(ekf6.y)
     X0 = X_calc
     X_lse.append(X_calc[0])
     Y_lse.append(X_calc[1])
@@ -594,7 +622,7 @@ while True:
         Z_lse.pop(0)
         T.pop(0)
 
-    apply_filter = 2
+    apply_filter = 0
 
     if apply_filter:
         moving_window = 15
