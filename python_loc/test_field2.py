@@ -293,33 +293,28 @@ def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator, l
     x_pid = navigator.x_pid
     y_pid = navigator.y_pid
 
-    x2585_len = -1.0
-    x262d_len = -1.0
-    x28b9_len = -1.0
-    x260f_len = -1.0
+    addrs = [0x0000] * 4
+    dists = [-1.0] * 4
 
+    i = 0
     for anch in loc["anchors"]:
         dist = anch["dist"]["dist"]
         addr = anch["dist"]["addr"]
 
-        if addr == 0x2585:
-            x2585_len = dist
-        if addr == 0x262d:
-            x262d_len = dist
-        if addr == 0x28b9:
-            x28b9_len = dist
-        if addr == 0x260f:
-            x260f_len = dist
+        addrs[i] = addr
+        dists[i] = dist
+        i += 1
 
-    # 1 double, 17 floats, 3 int32, 4 floats
-    buf = struct.pack("dfffffffffffffffffiiiffff",
+    # 1 double, 17 floats, 3 int32, 4 unsigned shorts, 4 floats
+    buf = struct.pack("dfffffffffffffffffiiiHHHHffff",
                       ts, x, y, z, parrot_alt, rate,
                       x_pid.Kp, x_pid.Ki, x_pid.Kd,
                       x_pid.components[0], x_pid.components[1], x_pid.components[2],
                       y_pid.Kp, y_pid.Ki, y_pid.Kd,
                       y_pid.components[0], y_pid.components[1], y_pid.components[2],
                       navigator.roll, navigator.pitch, nr_anchors,
-                      x2585_len, x262d_len, x28b9_len, x260f_len)
+                      addrs[0], addrs[1], addrs[2], addrs[3],
+                      dists[0], dists[1], dists[2], dists[3])
     sock.sendto(buf, (cfg.UDP_PLOT_IP, cfg.UDP_PLOT_PORT))
 
 
