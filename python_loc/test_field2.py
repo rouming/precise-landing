@@ -11,6 +11,8 @@ import os
 import re
 
 import filterpy.kalman
+from kalman import ekf_6
+from kalman import ekf_9
 
 import dwm1001_ble
 import nano33ble
@@ -421,7 +423,6 @@ def receive_parrot_data_from_sock(sock):
 def is_dwm_location_reliable(loc):
     return len(loc['anchors']) >= 3
 
-import time
 def get_dwm_location_or_parrot_data():
     global dwm_fd, nano33_fd, parrot_sock, dwm_loc, parrot_data, nano_data
 
@@ -519,7 +520,6 @@ def calc_pos(X0, loc):
     lowb = [-np.inf, -np.inf, 0]
     upb = [np.inf, np.inf, np.inf]
 
-    start = time.time()
     #res = least_squares(func1, X0, loss='cauchy', f_scale=0.001, bounds=(lowb, upb),
     res = least_squares(func1, X0, bounds=(lowb, upb),
                         #args=(la, lb, lc, ld), verbose=1)
@@ -534,8 +534,6 @@ def calc_pos(X0, loc):
     #           options={ 'ftol': 1e-5, 'disp': True}, args=loc)
     #           #options={'ftol': 1e-5,'eps' : 1e-8, 'disp': False}, args=loc)
 
-    stop = time.time()
-    print("calc time {}".format(stop - start))
     # experiments
     #res = minimize(func1, X0, method='BFGS', options={'xatol': 1e-8, 'disp': True}, args=(la, lb, lc, ld))
     #res = optimize.shgo(func1, bounds=[(-10, 10), (-10, 10), (0, 10)], args=(la, lb, lc, ld),n=200, iters=5, sampling_method='sobol')
@@ -548,14 +546,12 @@ plot_sock = create_plot_sock()
 
 navigator.start()
 
-from kalman import ekf_6
-from kalman import ekf_9
+if cfg.USE_KALMAN:
+    ekf6 = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
+    ekf6.x = np.array([[1], [0], [1], [0], [1], [0]])
 
-ekf6 = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
-ekf6.x = np.array([[1], [0], [1], [0], [1], [0]])
-
-ekf9 = filterpy.kalman.ExtendedKalmanFilter(dim_x=9, dim_z=4, dim_u=9)
-ekf9.x = np.array([[1], [0], [0], [1], [0], [0], [1], [0], [0]])
+    ekf9 = filterpy.kalman.ExtendedKalmanFilter(dim_x=9, dim_z=4, dim_u=9)
+    ekf9.x = np.array([[1], [0], [0], [1], [0], [0], [1], [0], [0]])
 
 def filter_dist(loc):
     for anch in loc["anchors"]:
@@ -590,15 +586,30 @@ while True:
         X0 = np.abs(np.array([x, y, z]))
         assigned = True
 
-    #X_calc = calc_pos(X0, loc)
+    start = time.time()
 
-    X_kalman = ekf_6(ekf6, loc)
-    #X_kalman = ekf_9(ekf9, loc, nano_data)
-    if X_kalman == None:
-        continue
+    #
+    # Choose what calculation method to use
+    #
+    if cfg.USE_KALMAN:
+        if cfg.USE_KALMAN == cfg.kalman_type.EKF6:
+            X_kalman = ekf_6(ekf6, loc)
+        elif cfg.USE_KALMAN == cfg.kalman_type.EKF9:
+            X_kalman = ekf_9(ekf9, loc, nano_data)
+        else:
+            assert(0)
 
-    X_calc = X_kalman
-    # print(ekf6.y)
+        if X_kalman == None:
+            continue
+
+        X_calc = X_kalman
+        apply_filter = 0
+    else:
+        X_calc = calc_pos(X0, loc)
+        apply_filter = 2
+
+    print("calc time {}".format(time.time() - start))
+
     X0 = X_calc
     X_lse.append(X_calc[0])
     Y_lse.append(X_calc[1])
@@ -615,8 +626,6 @@ while True:
         Y_lse.pop(0)
         Z_lse.pop(0)
         T.pop(0)
-
-    apply_filter = 0
 
     if apply_filter:
         moving_window = 15

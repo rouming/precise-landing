@@ -1,5 +1,14 @@
 #!/usr/bin/env python
 import numpy as np
+import enum
+
+class kalman_type(enum.Enum):
+    EKF6 = 0,
+    EKF9 = 1,
+
+# Do we use kalman
+USE_KALMAN = kalman_type.EKF6
+# USE_KALMAN = None
 
 # Distances from DWM1001-server
 MCAST_GRP = '224.1.1.1'

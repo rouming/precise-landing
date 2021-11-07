@@ -18,7 +18,7 @@ X_LIM = 3
 Y_LIM = 3
 Z_LIM = 3
 
-DRAW_3D_SCENE = True
+DRAW_3D_SCENE = False
 PLOT_FILTERED = False
 
 parrot_data = None
