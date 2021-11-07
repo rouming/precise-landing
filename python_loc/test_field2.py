@@ -471,8 +471,7 @@ def get_dwm_location_or_parrot_data():
 
             nano_data = {}
             nano_data["acc"] = acc # ax, ay, az, ts
-            nano_data["gyro"] = gyro
-            nano_data["mag"] = mag
+            nano_data["attitude"] = attitude
             nano_data["ts"] = time.time()
 
     return dwm_loc, parrot_data, nano_data
