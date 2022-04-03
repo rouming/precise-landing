@@ -5,7 +5,7 @@ import time
 import socket
 import ctypes
 
-file1 = open('data/field-session-2/test.log', 'r')
+file1 = open('data/field-session-2/log.6.leastsq.manual', 'r')
 
 MCAST_GRP = '224.1.1.1'
 MCAST_PORT = 5555
@@ -87,17 +87,20 @@ while True:
 
         dist_qf = line[line.find("qf=", start)+3 : line.find("#", start)]
         dist_qf = int(dist_qf)
+
+        #
+        # Be aware that we have all saved coords and distances in mm
+        #
+
         anchor = {
+            'addr': addr,
             'pos': {
-                'x':  int(x),
-                'y':  int(y),
-                'z':  int(z),
+                'coords':  [int(x), int(y), int(z)],
                 'qf': pos_qf,
                 'valid': pos_valid,
             },
             'dist': {
                 'dist': int(dist),
-                'addr': addr,
                 'qf': dist_qf
             },
         }
@@ -118,11 +121,13 @@ while True:
     for anchor in anchors:
         fmt = "iiihhihh"
 
+        coords = anchor["pos"]["coords"]
+
         # (x, y, z, pos_qf, pos_valid, dist, addr, dist_qf)
         struct.pack_into(fmt, buff, off,
-                         anchor["pos"]["x"], anchor["pos"]["y"], anchor["pos"]["z"],
+                         coords[0], coords[1], coords[2],
                          anchor["pos"]["qf"], anchor["pos"]["valid"],
-                         anchor["dist"]["dist"], anchor["dist"]["addr"],
+                         anchor["dist"]["dist"], anchor["addr"],
                          anchor["dist"]["qf"])
         off += struct.calcsize(fmt)
 

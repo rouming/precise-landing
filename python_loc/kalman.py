@@ -74,9 +74,10 @@ def generate_B_9(T):
 def generate_H_6(Xk, loc):
     H = np.empty([0, 6])
     for anchor in loc['anchors']:
-        anch_x = anchor["pos"]["x"]
-        anch_y = anchor["pos"]["y"]
-        anch_z = anchor["pos"]["z"]
+        coords = anchor["pos"]["coords"]
+        anch_x = coords[0]
+        anch_y = coords[1]
+        anch_z = coords[2]
 
         anch = np.array([anch_x, 0, anch_y, 0, anch_z, 0])
         pos = np.array([Xk[0][0], 0, Xk[2][0], 0, Xk[4][0], 0])
@@ -89,9 +90,10 @@ def generate_H_6(Xk, loc):
 def generate_H_9(Xk, loc):
     H = np.empty([0, 9])
     for anchor in loc['anchors']:
-        anch_x = anchor["pos"]["x"]
-        anch_y = anchor["pos"]["y"]
-        anch_z = anchor["pos"]["z"]
+        coords = anchor["pos"]["coords"]
+        anch_x = coords[0]
+        anch_y = coords[1]
+        anch_z = coords[2]
 
         anch = np.array([anch_x, 0, 0, anch_y, 0, 0, anch_z, 0, 0])
         pos = np.array([Xk[0][0], 0, 0, Xk[3][0], 0, 0, Xk[6][0], 0, 0])
@@ -119,9 +121,10 @@ def get_u(nano_data):
 def hx_func_6(x, loc):
     r_pred = []
     for anchor in loc['anchors']:
-        anch_x = anchor["pos"]["x"]
-        anch_y = anchor["pos"]["y"]
-        anch_z = anchor["pos"]["z"]
+        coords = anchor["pos"]["coords"]
+        anch_x = coords[0]
+        anch_y = coords[1]
+        anch_z = coords[2]
 
         anch = np.array([anch_x, anch_y, anch_z])
         pos = np.array([x[0][0], x[2][0], x[4][0]])
@@ -133,9 +136,10 @@ def hx_func_6(x, loc):
 def hx_func_9(x, loc):
     r_pred = []
     for anchor in loc['anchors']:
-        anch_x = anchor["pos"]["x"]
-        anch_y = anchor["pos"]["y"]
-        anch_z = anchor["pos"]["z"]
+        coords = anchor["pos"]["coords"]
+        anch_x = coords[0]
+        anch_y = coords[1]
+        anch_z = coords[2]
 
         anch = np.array([anch_x, anch_y, anch_z])
         pos = np.array([x[0][0], x[3][0], x[6][0]])
@@ -151,9 +155,10 @@ def ekf_6(filter, loc):
     if not initialized:
         # F = generate_F(0.1)
         # Q = generate_Q(0.01, sigma_a)
-        # x0 = loc["calc_pos"]["x"]
-        # y0 = loc["calc_pos"]["y"]
-        # z0 = loc["calc_pos"]["z"]
+        # coords = loc["pos"]["coords"]
+        # x0 = coords[0]
+        # y0 = coords[1]
+        # z0 = coords[2]
         # Xk = np.array([[x0, 0, y0, 0, z0, 0]]).T
         last_T = loc["ts"]
         initialized = True
@@ -209,9 +214,10 @@ def ekf_9(filter, loc, nano_data):
     if not initialized:
         # F = generate_F(0.1)
         # Q = generate_Q(0.01, sigma_a)
-        # x0 = loc["calc_pos"]["x"]
-        # y0 = loc["calc_pos"]["y"]
-        # z0 = loc["calc_pos"]["z"]
+        # coords = loc["pos"]["coords"]
+        # x0 = coords[0]
+        # y0 = coords[1]
+        # z0 = coords[2]
         # Xk = np.array([[x0, 0, y0, 0, z0, 0]]).T
         last_T = loc["ts"]
         initialized = True

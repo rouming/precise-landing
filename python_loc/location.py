@@ -6,9 +6,12 @@ import socket
 import struct
 import select
 import threading
+import eventfd
 import enum
 import os
 import re
+import sys
+import signal
 
 import filterpy.kalman
 from kalman import ekf_6
@@ -30,7 +33,6 @@ from scipy.signal import savgol_filter
 from scipy.ndimage import gaussian_filter1d
 
 
-
 dwm_fd      = None
 nano33_fd   = None
 parrot_sock = None
@@ -39,6 +41,15 @@ plot_sock   = None
 dwm_loc     = None
 parrot_data = None
 nano_data   = None
+
+dwm_manager = None
+
+nano33_manager = None
+
+should_stop = False
+stop_efd    = eventfd.EventFD()
+
+anch_len_log = {}
 
 X_lse = []
 Y_lse = []
@@ -66,8 +77,7 @@ DWM_DATA_SOURCE = dwm_source.BLE
 #DWM_DATA_SOURCE = dwm_source.SOCK
 
 class len_log:
-    def __init__(self, anch):
-        self.anch = anch
+    def __init__(self):
         self.data = []
         self.T = []
 
@@ -95,9 +105,6 @@ class len_log:
 
         return res
 
-anch_len_log = {}
-for anch in cfg.ANCHORS.keys():
-    anch_len_log[anch] = len_log(anch)
 #
 # Welford's online algorithm
 # https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
@@ -203,7 +210,7 @@ class drone_navigator(threading.Thread):
         pid.output_limits = limits
 
     def run(self):
-        while True:
+        while not should_stop:
             time.sleep(1/PID_CONTROL_RATE_HZ)
 
             self.lock.acquire()
@@ -249,33 +256,48 @@ def create_dwm_sock():
     return sock
 
 def create_dwm_ble():
-    manager = dwm1001_ble.DwmDeviceManager()
-    device = dwm1001_ble.DwmDevice(mac_address=cfg.TAG_MAC, manager=manager)
+    global dwm_manager
 
-    device.connect()
-    manager.start()
+    efd = eventfd.EventFD()
+    eventfd_map = {cfg.TAG_ADDR: efd}
+    dwm_manager = dwm1001_ble.DWMDeviceManager(adapter_name='hci0',
+                                               predefined_anchors=cfg.ANCHORS,
+                                               eventfd_map=eventfd_map)
+    dwm_manager.start()
 
-    global dwm_device
-    dwm_device = device
+    return efd
 
-    return device.eventfd
+def destroy_dwm_ble():
+    if dwm_manager:
+        dwm_manager.stop()
 
 def create_nano33_ble():
-    manager = nano33ble.Nano33DeviceManager()
-    device = nano33ble.Nano33Device(mac_address=cfg.NANO33_MAC, manager=manager)
+    global nano33_manager
+    nano33_manager = nano33ble.Nano33DeviceManager()
+    device = nano33ble.Nano33Device(mac_address=cfg.NANO33_MAC,
+                                    manager=nano33_manager)
 
     device.connect()
-    manager.start()
+    nano33_manager.start()
 
     global nano33_device
     nano33_device = device
 
     return device.eventfd
 
+def destroy_nano33_ble():
+    global nano33_manager
+    if nano33_manager:
+        nano33_manager.stop()
+
 def create_dwm_fd():
     if DWM_DATA_SOURCE == dwm_source.SOCK:
         return create_dwm_sock()
     return create_dwm_ble()
+
+def destroy_dwm_fd():
+    if DWM_DATA_SOURCE == dwm_source.BLE:
+        destroy_dwm_ble()
 
 def create_parrot_sock():
     # Create parrot sock
@@ -300,8 +322,8 @@ def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator, l
 
     i = 0
     for anch in loc["anchors"]:
+        addr = anch["addr"]
         dist = anch["dist"]["dist"]
-        addr = anch["dist"]["addr"]
 
         addrs[i] = addr
         dists[i] = dist
@@ -332,10 +354,10 @@ def receive_dwm_location_from_sock(sock):
     print("ts:%ld.%06ld [%d,%d,%d,%u] " % (ts_sec, ts_usec, x, y, z, pos_qf), end='')
 
     location = {
-        'calc_pos': {
-            'x':  float(x) / 1000,
-            'y':  float(y) / 1000,
-            'z':  float(z) / 1000,
+        'pos': {
+            'coords': [float(x) / 1000,
+                       float(y) / 1000,
+                       float(z) / 1000 ],
             'qf': pos_qf,
             'valid': pos_valid,
         },
@@ -360,16 +382,16 @@ def receive_dwm_location_from_sock(sock):
               end='')
 
         anchor = {
+            'addr': addr,
             'pos': {
-                'x':  float(x) / 1000,
-                'y':  float(y) / 1000,
-                'z':  float(z) / 1000,
+                'coords': [float(x) / 1000,
+                           float(y) / 1000,
+                           float(z) / 1000],
                 'qf': pos_qf,
                 'valid': pos_valid,
             },
             'dist': {
                 'dist': float(dist) / 1000,
-                'addr': addr,
                 'qf': dist_qf
             },
         }
@@ -384,16 +406,12 @@ def receive_dwm_location(dwm_fd):
     if DWM_DATA_SOURCE == dwm_source.SOCK:
         return receive_dwm_location_from_sock(dwm_fd)
 
-    global dwm_device
-    loc = dwm_device.get_location()
-
-    # FIXME: extend the BLE anchors with coords from config
-    # FIXME: well, this is ugly
-    for anchor in loc['anchors']:
-        anchor_coords = cfg.ANCHORS[anchor['dist']['addr']]
-        anchor['pos']['x'] = anchor_coords[0]
-        anchor['pos']['y'] = anchor_coords[1]
-        anchor['pos']['z'] = anchor_coords[2]
+    loc = {}
+    tag = dwm_manager.find_device_by_node_addr(cfg.TAG_ADDR)
+    if tag:
+        loc = tag.get_location()
+    else:
+        print("Error: can't find tag by addr 0x%x" % tag_addr)
 
     return loc
 
@@ -425,6 +443,7 @@ def is_dwm_location_reliable(loc):
 
 def get_dwm_location_or_parrot_data():
     global dwm_fd, nano33_fd, parrot_sock, dwm_loc, parrot_data, nano_data
+    global stop_efd
 
     if dwm_fd is None:
         dwm_fd = create_dwm_fd()
@@ -436,23 +455,29 @@ def get_dwm_location_or_parrot_data():
     dwm_received = False
 
     # Suck everything from the socket, we need really up-to-date data
-    while (True):
+    while True:
         # Wait inifinitely if we don't have reliable DWM location
         timeout = 0 if dwm_received else None
 
-        rd, wr, ex = select.select([dwm_fd, nano33_fd, parrot_sock], [], [], timeout)
+        rd, wr, ex = select.select([dwm_fd, nano33_fd, parrot_sock, stop_efd],
+                                   [], [], timeout)
         if 0 == len(rd):
             break
+        if stop_efd in rd:
+            break;
 
         if dwm_fd in rd:
             loc = receive_dwm_location(dwm_fd)
-            print("ts:%.6f [%.2f,%.2f,%.2f,%u] " % (loc['ts'], loc['calc_pos']['x'], loc['calc_pos']['y'], loc['calc_pos']['z'],
-                                               loc['calc_pos']['qf']), end='')
+            coords = loc['pos']['coords']
+            print("ts:%.6f [%.2f,%.2f,%.2f,%u] " % \
+                  (loc['ts'], coords[0], coords[1], coords[2], loc['pos']['qf']),
+                  end='')
             i = 0
             for anch in loc['anchors']:
-                print("#%u) a:0x%04x [%.2f,%.2f,%.2f,%.2f] d=%.2f,qf=%u " % (i, anch['dist']['addr'],
-                                                                   anch['pos']['x'], anch['pos']['y'], anch['pos']['z'],
-                                                                   anch['pos']['qf'], anch['dist']['dist'], anch['dist']['qf']), \
+                coords = anch['pos']['coords']
+                print("#%u) a:0x%04x [%.2f,%.2f,%.2f,%.2f] d=%.2f,qf=%u " % \
+                      (i, anch['addr'], coords[0], coords[1], coords[2],
+                       anch['pos']['qf'], anch['dist']['dist'], anch['dist']['qf']), \
                       end='')
                 i += 1
             print('')
@@ -479,7 +504,7 @@ def get_dwm_location_or_parrot_data():
 
 def find_anchor_by_addr(location, addr):
     for anchor in location['anchors']:
-        if anchor['dist']['addr'] == addr:
+        if anchor['addr'] == addr:
             return anchor
 
     return None
@@ -487,7 +512,8 @@ def find_anchor_by_addr(location, addr):
 def func1(X, loc):
     sum = 0
     for anch in loc["anchors"]:
-        anchor_pos = np.array([anch["pos"]["x"], anch["pos"]["y"], anch["pos"]["z"]], dtype=np.float64)
+        coords = anch["pos"]["coords"]
+        anchor_pos = np.array(coords, dtype=np.float64)
         dist = anch["dist"]["dist"]
         sum += (np.linalg.norm(X - anchor_pos) - dist) ** 2
     return sum
@@ -555,26 +581,40 @@ if cfg.USE_KALMAN:
 
 def filter_dist(loc):
     for anch in loc["anchors"]:
-        addr = anch["dist"]["addr"]
-
+        addr = anch["addr"]
         dist = anch["dist"]["dist"]
+
+        if addr not in anch_len_log:
+            anch_len_log[addr] = len_log()
+
         anch_len_log[addr].add_to_filter(dist, ts)
 
         print("dist before filtering %.4f" % dist)
         anch["dist"]["dist"] = anch_len_log[addr].get_last_filtered()
         print("dist after filtering %.4f" % anch["dist"]["dist"])
 
+def sigint_handler(sig, frame):
+    print(' You pressed Ctrl+C! Disconnecting all devices, please wait ...')
+    global should_stop, stop_efd
+    should_stop = True
+    stop_efd.set()
+
+signal.signal(signal.SIGINT, sigint_handler)
+
 while True:
     print(">> get location from anchors")
 
     loc, parrot_data, nano_data = get_dwm_location_or_parrot_data()
+    if should_stop:
+        break
 
     print(">> got calculated position from the engine")
 
-    x = loc['calc_pos']['x']
-    y = loc['calc_pos']['y']
-    z = loc['calc_pos']['z']
-    qf = loc['calc_pos']['qf']
+    coords = loc['pos']['coords']
+    x = coords[0]
+    y = coords[1]
+    z = coords[2]
+    qf = loc['pos']['qf']
     ts = loc["ts"]
 
     parrot_alt = 0
@@ -674,3 +714,6 @@ while True:
 
     send_plot_data(plot_sock, xf, yf, zf, parrot_alt, ts, rate,
                    len(loc['anchors']), navigator, loc)
+
+destroy_dwm_fd()
+destroy_nano33_ble()

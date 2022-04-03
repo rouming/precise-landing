@@ -35,7 +35,7 @@ class dynamic_dist_plot():
     # For cleaning
     previous_text = None
 
-    def __init__(self, plot_title, x_label, y_label, addrs):
+    def __init__(self, plot_title, x_label, y_label):
         # Turn on plot interactive mode
         plt.ion()
 
@@ -57,11 +57,6 @@ class dynamic_dist_plot():
         self.lines = {}
         self.dists = {}
 
-        for addr in addrs:
-            lines, = self.ax.plot([],[], '-', label="%x" % addr)
-            self.lines[addr] = lines
-            self.dists[addr] = []
-
         # Set other members
         self.xdata  = []
 
@@ -79,6 +74,13 @@ class dynamic_dist_plot():
 
     def update(self, xdata, addrs, dists):
         self.xdata.append(xdata)
+
+        for addr in addrs:
+            # Add not yet existent addresses
+            if addr != 0x0000 and addr not in self.lines:
+                lines, = self.ax.plot([],[], '-', label="%04x" % addr)
+                self.lines[addr] = lines
+                self.dists[addr] = []
 
         for addr in self.dists.keys():
             dist = -1
@@ -241,9 +243,6 @@ def draw_scene(ax, X, Y, Z, parrot_alt, ts, anch_cnt):
     global first_ts
     global parrot_data
 
-    coords = list(cfg.ANCHORS.values())
-    rects = [[coords[0], coords[1], coords[2], coords[3]]]
-
     if first_ts == 0 and ts != first_ts:
         first_ts = ts
 
@@ -269,7 +268,8 @@ def draw_scene(ax, X, Y, Z, parrot_alt, ts, anch_cnt):
         ax.text2D(0.0, 0.82, "diff {:6.2f}m".format(Z[-1] - parrot_alt),
                   transform=ax.transAxes)
 
-    ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
+    # TODO: draw anchors
+    # ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
     ax.set_xlim3d(-X_LIM, X_LIM)
     ax.set_ylim3d(-Y_LIM, Y_LIM)
     ax.set_zlim3d(0, Z_LIM)
@@ -316,8 +316,7 @@ if __name__ == '__main__':
                               'PID', 'target', cfg.LANDING_Y)
 
     # create len plots
-    len_plot = dynamic_dist_plot("Anchors dist", "Time (s)", "Drone distance (m)",
-                                 cfg.ANCHORS.keys())
+    len_plot = dynamic_dist_plot("Anchors dist", "Time (s)", "Drone distance (m)")
 
     # Create 3D plot
     if DRAW_3D_SCENE:

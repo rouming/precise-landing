@@ -36,14 +36,14 @@ TESTING_STAND = 2
 if TESTING_STAND == 1:
     # Anchors coords (should create a rectangle with clockwise coords)
     ANCHORS = {
-        0x2585: np.array([0.60,0.60,0.00]),
-        0x262d: np.array([0.60,0.00,0.00]),
-        0x28b9: np.array([0.00,0.00,0.00]),
-        0x260f: np.array([0.00,0.60,0.00]),
+        0x2585: [0.60, 0.60, 0.00],
+        0x262d: [0.60, 0.00, 0.00],
+        0x28b9: [0.00, 0.00, 0.00],
+        0x260f: [0.00, 0.60, 0.00],
     }
 
     # Tag
-    TAG_MAC = "c7:bc:67:9e:e0:98"
+    TAG_ADDR = None # XXX ???????
 
     # Nano33Ble
     NANO33_MAC = "ed:26:b0:24:73:0c"
@@ -51,25 +51,29 @@ if TESTING_STAND == 1:
 elif TESTING_STAND == 2:
     # Anchors coords (should create a rectangle with clockwise coords)
     ANCHORS = {
-        0x14d5: np.array([0.000, 0.040, 0.000]),
-        0x14d9: np.array([0.000, 0.300, 0.000]),
-        0x14ca: np.array([0.040, 0.600, 0.005]),
-        0x1337: np.array([0.295, 0.600, 0.005]),
-        0x0465: np.array([0.605, 0.560, 0.000]),
-        0x14c6: np.array([0.605, 0.300, 0.00]),
-        0x14c8: np.array([0.570, 0.000, 0.005]),
-        0x11cf: np.array([0.300, 0.000, 0.005]),
+#        0x14d5: [0.000, 0.040, 0.000],
+#        0x14d9: [0.000, 0.300, 0.000],
+#        0x14ca: [0.040, 0.600, 0.005],
+#        0x1337: [0.295, 0.600, 0.005],
+#        0x0465: [0.605, 0.560, 0.000],
+#        0x14c6: [0.605, 0.300, 0.000],
+#        0x14c8: [0.570, 0.000, 0.005],
+#        0x11cf: [0.300, 0.000, 0.005],
     }
 
+    #
     # Tags
+    #
 
-    # 16e9
-    TAG_MAC = "d6:42:9c:d1:db:7e"
+    # First
+    TAG_ADDR = 0x16e9
 
-    # 16fc
-    #TAG_MAC = "df:fa:e6:1b:64:a7"
+    # Second
+    #TAG_ADDR = 0x16fc
 
-    # Nano33Ble
+    #
+    # Nano33BLE
+    #
     NANO33_MAC = "e6:13:3e:cf:ea:78"
 
 else:

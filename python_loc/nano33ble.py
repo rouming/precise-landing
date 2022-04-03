@@ -7,7 +7,7 @@ import time
 import eventfd
 
 NANO_SERVICE_UUID = '590d65c7-3a0a-4023-a05a-6aaf2f22441c'
-NANO_DATA_ID  = '00000001-0000-1000-8000-00805f9b34fb'
+NANO_DATA_UUID    = '00000001-0000-1000-8000-00805f9b34fb'
 
 class ManagerThread(threading.Thread):
     def __init__(self, manager):
@@ -15,8 +15,10 @@ class ManagerThread(threading.Thread):
         self.manager = manager
 
     def run(self):
+        self.manager.start_discovery()
         # Jumps to manager event loop
         self.manager.run()
+        self.manager.stop_discovery()
 
 class Nano33DeviceManager(gatt.DeviceManager):
     def __init__(self, adapter_name='hci0', discovery_callback=None):
@@ -33,8 +35,6 @@ class Nano33DeviceManager(gatt.DeviceManager):
 
     def stop(self):
         super().stop()
-
-    def join(self):
         self.thread.join()
 
 class Nano33Device(gatt.Device):
@@ -55,7 +55,7 @@ class Nano33Device(gatt.Device):
             if s.uuid == NANO_SERVICE_UUID)
 
         for ch in device_information_service.characteristics:
-            if ch.uuid == NANO_DATA_ID:
+            if ch.uuid == NANO_DATA_UUID:
                 ch.enable_notifications()
 
     def characteristic_value_updated(self, characteristic, value):
@@ -64,7 +64,7 @@ class Nano33Device(gatt.Device):
         x, y, z, yaw, pitch, roll, ts = struct.unpack(fmt, value)
 
         self.lock.acquire()
-        if characteristic.uuid == NANO_DATA_ID:
+        if characteristic.uuid == NANO_DATA_UUID:
             self.acc      = [x, y, z, ts]
             self.attitude = [yaw, pitch, roll, ts]
         self.eventfd.set()
@@ -80,21 +80,30 @@ class Nano33Device(gatt.Device):
         self.lock.release()
         return acc, attitude
 
+help = \
+"""NANO33BLE
+
+Usage:
+  nano33ble.py --mac <mac> [--adapter <adapter>]
+
+Options:
+  -h --help             Show this screen
+  --mac <mac>           BLE device mac address
+  --adapter <adapter>   Adapter name, default is hci0
+"""
+
+from docopt import docopt
 import select
-import argparse
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--discover", action="store_true", help="Discover active DWM bluetooth devices")
-    parser.add_argument("--adapter", type=str, default= "hci0", help="Bluetooth adapter to use")
-    parser.add_argument("--readlocation", action="store_true", help="Read location from the dwm device")
-    parser.add_argument("--continous", action="store_true", help="Continously read location from the device")
-    parser.add_argument("--mac", type=str, help="Target device mac address")
+    args = docopt(help)
 
-    args = parser.parse_args()
+    adapter = 'hci0'
+    if args['--adapter']:
+        adapter = args['--adapter']
 
-    manager = Nano33DeviceManager(adapter_name=args.adapter)
-    device = Nano33Device(mac_address=args.mac, manager=manager)
+    manager = Nano33DeviceManager(adapter_name=adapter)
+    device = Nano33Device(mac_address=args['--mac'], manager=manager)
 
     device.connect()
     manager.start()
