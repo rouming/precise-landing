@@ -71,13 +71,8 @@ def send_dwm_data(loc):
 
     sock.sendto(buff, (MCAST_GRP, MCAST_PORT))
 
-if __name__ == '__main__':
-    args = docopt(__doc__)
-
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL)
-    parot_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    data_file = open(args['--file'], 'r')
+def parse_log_file(data_file):
+    global last_ts, last_ts_s, last_ts_us
 
     while True:
         line = data_file.readline()
@@ -164,3 +159,17 @@ if __name__ == '__main__':
 
         else:
             last_ts = float(ts)
+
+
+if __name__ == '__main__':
+    args = docopt(__doc__)
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL)
+    parot_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    data_file = open(args['--file'], 'r')
+
+    if args['--trajectory']:
+        parse_trajectory_file(data_file)
+    else:
+        parse_log_file(data_file)
