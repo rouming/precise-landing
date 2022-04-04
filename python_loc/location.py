@@ -351,8 +351,6 @@ def receive_dwm_location_from_sock(sock):
     # Unpack location header
     (x, y, z, pos_qf, pos_valid, ts_sec, ts_usec, nr_anchors) = struct.unpack(fmt, buf)
 
-    print("ts:%ld.%06ld [%d,%d,%d,%u] " % (ts_sec, ts_usec, x, y, z, pos_qf), end='')
-
     location = {
         'pos': {
             'coords': [float(x) / 1000,
@@ -378,9 +376,6 @@ def receive_dwm_location_from_sock(sock):
         (x, y, z, pos_qf, pos_valid, dist, addr, dist_qf) = struct.unpack_from(fmt, buf, off)
         off += struct.calcsize(fmt)
 
-        print("#%u) a:0x%08x [%d,%d,%d,%u] d=%u,qf=%u " % (i, addr, x, y, z, pos_qf, dist, dist_qf), \
-              end='')
-
         anchor = {
             'addr': addr,
             'pos': {
@@ -397,8 +392,6 @@ def receive_dwm_location_from_sock(sock):
         }
 
         location['anchors'].append(anchor)
-
-    print('')
 
     return location
 
@@ -441,6 +434,26 @@ def receive_parrot_data_from_sock(sock):
 def is_dwm_location_reliable(loc):
     return len(loc['anchors']) >= 3
 
+def print_location(loc):
+    coords = loc['pos']['coords']
+    # To mm, because we have all the logs in mm, not in m, argh
+    coords = [int(v * 1000) for v in coords]
+    print("ts:%.6f [%d,%d,%d,%u] " % \
+          (loc['ts'], coords[0], coords[1], coords[2], loc['pos']['qf']),
+          end='')
+    i = 1
+    for anch in loc['anchors']:
+        coords = anch['pos']['coords']
+        # To mm, because we have all the logs in mm, not in m, argh
+        coords = [int(v * 1000) for v in coords]
+        dist = int(anch['dist']['dist'] * 1000)
+        print("#%u) a:0x%04x [%d,%d,%d,%u] d=%u,qf=%u " % \
+              (i, anch['addr'], coords[0], coords[1], coords[2],
+               anch['pos']['qf'], dist, anch['dist']['qf']), \
+              end='')
+        i += 1
+    print('')
+
 def get_dwm_location_or_parrot_data():
     global dwm_fd, nano33_fd, parrot_sock, dwm_loc, parrot_data, nano_data
     global stop_efd
@@ -468,23 +481,7 @@ def get_dwm_location_or_parrot_data():
 
         if dwm_fd in rd:
             loc = receive_dwm_location(dwm_fd)
-            coords = loc['pos']['coords']
-            # To mm, because we have all the logs in mm, not in m, argh
-            coords = [int(v * 1000) for v in coords]
-            print("ts:%.6f [%d,%d,%d,%u] " % \
-                  (loc['ts'], coords[0], coords[1], coords[2], loc['pos']['qf']),
-                  end='')
-            i = 0
-            for anch in loc['anchors']:
-                coords = anch['pos']['coords']
-                # To mm, because we have all the logs in mm, not in m, argh
-                coords = [int(v * 1000) for v in coords]
-                print("#%u) a:0x%04x [%d,%d,%d,%u] d=%.2f,qf=%u " % \
-                      (i, anch['addr'], coords[0], coords[1], coords[2],
-                       anch['pos']['qf'], anch['dist']['dist'], anch['dist']['qf']), \
-                      end='')
-                i += 1
-            print('')
+            print_location(loc)
 
             if is_dwm_location_reliable(loc):
                 dwm_received = True
