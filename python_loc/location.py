@@ -333,9 +333,11 @@ def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator, l
         dists[i] = dist
         i += 1
 
-    # 1 double, 17 floats, 3 int32, 4 unsigned shorts, 4 floats
-    buf = struct.pack("dfffffffffffffffffiiiHHHHffff",
-                      ts, x, y, z, parrot_alt, rate,
+    buf = struct.pack("dffffffBffffffffffffffiiiHHHHffff",
+                      ts,
+                      x, y, z,
+                      *loc['pos']['coords'], loc['pos']['valid'],
+                      parrot_alt, rate,
                       x_pid.Kp, x_pid.Ki, x_pid.Kd,
                       x_pid.components[0], x_pid.components[1], x_pid.components[2],
                       y_pid.Kp, y_pid.Ki, y_pid.Kd,

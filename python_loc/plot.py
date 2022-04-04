@@ -281,8 +281,7 @@ def recv_math_output(sock):
     # Wait for data
     select.select([sock], [], [], None)
 
-    # 1 double, 17 floats, 3 int32, 4 unsigned shorts, 4 floats
-    fmt = "dfffffffffffffffffiiiHHHHffff"
+    fmt = "dffffffBffffffffffffffiiiHHHHffff"
     sz = struct.calcsize(fmt)
 
     # Suck everything, drop all packets except the last one
@@ -335,7 +334,9 @@ if __name__ == '__main__':
     start_ts = 0.0
 
     while True:
-        (ts, x, y, z, parrot_alt, rate, xKp, xKi, xKd, xp, xi, xd,
+        (ts, x, y, z,
+         true_x, true_y, true_z, true_pos_valid,
+         parrot_alt, rate, xKp, xKi, xKd, xp, xi, xd,
          yKp, yKi, yKd, yp, yi, yd, roll, pitch, nr_anchors,
          addr1, addr2, addr3, addr4, dist1, dist2, dist3, dist4,
          dropped) = recv_math_output(sock)
