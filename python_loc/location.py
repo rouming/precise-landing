@@ -469,13 +469,17 @@ def get_dwm_location_or_parrot_data():
         if dwm_fd in rd:
             loc = receive_dwm_location(dwm_fd)
             coords = loc['pos']['coords']
-            print("ts:%.6f [%.2f,%.2f,%.2f,%u] " % \
+            # To mm, because we have all the logs in mm, not in m, argh
+            coords = [int(v * 1000) for v in coords]
+            print("ts:%.6f [%d,%d,%d,%u] " % \
                   (loc['ts'], coords[0], coords[1], coords[2], loc['pos']['qf']),
                   end='')
             i = 0
             for anch in loc['anchors']:
                 coords = anch['pos']['coords']
-                print("#%u) a:0x%04x [%.2f,%.2f,%.2f,%.2f] d=%.2f,qf=%u " % \
+                # To mm, because we have all the logs in mm, not in m, argh
+                coords = [int(v * 1000) for v in coords]
+                print("#%u) a:0x%04x [%d,%d,%d,%u] d=%.2f,qf=%u " % \
                       (i, anch['addr'], coords[0], coords[1], coords[2],
                        anch['pos']['qf'], anch['dist']['dist'], anch['dist']['qf']), \
                       end='')
