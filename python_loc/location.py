@@ -272,6 +272,10 @@ def destroy_dwm_ble():
         dwm_manager.stop()
 
 def create_nano33_ble():
+    if DWM_DATA_SOURCE != dwm_source.BLE:
+        # TODO: this is ugly
+        return eventfd.EventFD()
+
     global nano33_manager
     nano33_manager = nano33ble.Nano33DeviceManager()
     device = nano33ble.Nano33Device(mac_address=cfg.NANO33_MAC,
