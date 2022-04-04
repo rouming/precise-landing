@@ -43,6 +43,34 @@ def send_parrot_data(line):
     struct.pack_into(fmt, buff, 0, last_ts_s, last_ts_us, alt, roll, pitch, yaw)
     parot_sock.sendto(buff, (PARROT_IP, PARROT_PORT))
 
+def send_dwm_data(loc):
+    nr_anchors = len(loc['anchors'])
+
+    fmt = "iiihhiii"
+    buff = ctypes.create_string_buffer(512)
+
+    pos = loc['pos']
+
+    # (x, y, z, pos_qf, pos_valid, ts_sec, ts_usec, nr_anchors)
+    struct.pack_into(fmt, buff, 0,
+                     *pos['coords'], pos['qf'], pos['valid'],
+                     loc['ts_s'], loc['ts_us'], nr_anchors)
+    off = struct.calcsize(fmt)
+
+    for anchor in loc['anchors']:
+        fmt = "iiihhihh"
+        coords = anchor["pos"]["coords"]
+
+        # (x, y, z, pos_qf, pos_valid, dist, addr, dist_qf)
+        struct.pack_into(fmt, buff, off,
+                         *coords,
+                         anchor["pos"]["qf"], anchor["pos"]["valid"],
+                         anchor["dist"]["dist"], anchor["addr"],
+                         anchor["dist"]["qf"])
+        off += struct.calcsize(fmt)
+
+    sock.sendto(buff, (MCAST_GRP, MCAST_PORT))
+
 if __name__ == '__main__':
     args = docopt(__doc__)
 
@@ -71,11 +99,17 @@ if __name__ == '__main__':
 
         vals = line[line.find("[")+1 : line.find("]")]
         vals = vals.split(",")
-        pos_x = int(vals[0])
-        pos_y = int(vals[1])
-        pos_z = int(vals[2])
-        pos_qf = int(vals[3])
-        pos_valid = 1 # is it?
+
+        # Be aware that we have all saved coords and distances in mm
+        loc = {
+            'pos': {
+                'coords': [int(vals[0]), int(vals[1]), int(vals[2])],
+                'qf': int(vals[3]),
+                'valid': True
+            },
+            'ts_s': ts_s,
+            'ts_us': ts_us,
+        }
 
         anchor_cnt = 0
         start = 0
@@ -99,16 +133,13 @@ if __name__ == '__main__':
             dist_qf = line[line.find("qf=", start)+3 : line.find("#", start)]
             dist_qf = int(dist_qf)
 
-            #
             # Be aware that we have all saved coords and distances in mm
-            #
-
             anchor = {
                 'addr': addr,
                 'pos': {
                     'coords':  [int(x), int(y), int(z)],
-                    'qf': pos_qf,
-                    'valid': pos_valid,
+                    'qf': loc['pos']['qf'],
+                    'valid': loc['pos']['valid'],
                 },
                 'dist': {
                     'dist': int(dist),
@@ -120,28 +151,8 @@ if __name__ == '__main__':
             start += 1
             anchor_cnt += 1
 
-        nr_anchors = len(anchors)  # is is not used
-
-        fmt = "iiihhiii"
-        buff = ctypes.create_string_buffer(512)
-
-        # (x, y, z, pos_qf, pos_valid, ts_sec, ts_usec, nr_anchors)
-        struct.pack_into(fmt, buff, 0,
-                         pos_x, pos_y, pos_z, pos_qf, pos_valid,
-                         ts_s, ts_us, nr_anchors)
-        off = struct.calcsize(fmt)
-
-        for anchor in anchors:
-            fmt = "iiihhihh"
-            coords = anchor["pos"]["coords"]
-
-            # (x, y, z, pos_qf, pos_valid, dist, addr, dist_qf)
-            struct.pack_into(fmt, buff, off,
-                             coords[0], coords[1], coords[2],
-                             anchor["pos"]["qf"], anchor["pos"]["valid"],
-                             anchor["dist"]["dist"], anchor["addr"],
-                             anchor["dist"]["qf"])
-            off += struct.calcsize(fmt)
+        loc['anchors'] = anchors
+        send_dwm_data(loc)
 
         if last_ts != 0:
             delay = (float(ts) - last_ts) / speed
@@ -153,5 +164,3 @@ if __name__ == '__main__':
 
         else:
             last_ts = float(ts)
-
-        sock.sendto(buff, (MCAST_GRP, MCAST_PORT))
