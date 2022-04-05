@@ -3,12 +3,18 @@
 """File to socket
 
 Usage:
-  file_to_sock.py --file <file> [--trajectory]
+  file_to_sock.py parse-log        --file <file>
+  file_to_sock.py parse-trajectory --file <file> --anchor <anchor>... [--noise-std <sigma>] [--seed <seed>]
 
 Options:
-  -h --help          Show this screen
-  --file <file>      File with logged data, e.g. data/field-session-2/log.6.leastsq.manual
-  --trajectory       File data is a true trajectory with x,y,z
+  -h --help              Show this screen
+  --file <file>          File with logged data, e.g. data/field-session-2/log.6.leastsq.manual
+  --anchor <anchor>      Specify anchor in the format 'addr_in_hex,x_mm,y_mm,z_mm',
+                         e.g. '0x16e9,0,100,0'. At least 3 anchors should be specified.
+  --noise-std <sigma>    Add gaussian noise in mm to the anchor calculated distance,
+                         e.g. standard deviation of real a DWM1001 device can vary
+                         from 20mm to 200mm.
+  --seed <seed>          Seed value for the random generator. 0 is the default value.
 """
 
 from docopt import docopt
@@ -16,6 +22,9 @@ import struct
 import time
 import socket
 import ctypes
+import sys
+import numpy as np
+import math
 
 MCAST_GRP = '224.1.1.1'
 MCAST_PORT = 5555
@@ -156,10 +165,89 @@ def parse_log_file(data_file):
             last_ts = float(ts)
             last_ts_s = ts_s
             last_ts_us = ts_us
-
         else:
             last_ts = float(ts)
 
+def parse_trajectory_file(args, data_file):
+    anchors_args = args['--anchor']
+    if len(anchors_args) < 3:
+        print("Error: at least 3 anchors should be specified")
+        sys.exit(-1)
+
+    seed = 0
+    if args['--seed']:
+        seed = int(args['--seed'])
+
+    np.random.seed(seed)
+
+    noise_std = 0.0
+    if args['--noise-std']:
+        noise_std = float(args['--noise-std'])
+
+    anchors = []
+    for anchor_arg in anchors_args:
+        arr = anchor_arg.split(',')
+        if len(arr) != 4:
+            print("Error: anchor %s format is incorrect" % anchor_arg)
+            sys.exit(-1)
+
+        anchors.append({
+            'addr': int(arr[0], base=16),
+            'pos': {
+                'coords': [int(arr[1]), int(arr[2]), int(arr[3])],
+                'qf': 100,
+                'valid': True,
+            },
+        })
+
+    while True:
+        line = data_file.readline()
+        if not line:
+            break
+
+        ts = time.time()
+        ts_us, ts_s = math.modf(ts)
+        ts_us = int(ts_us * 1000000)
+        ts_s = int(ts_s)
+
+        coords = line.split(',')
+        if len(coords) != 3:
+            print("Error: trajectory file is incorrect format")
+            sys.exit(-1)
+
+        coords = [int(v) for v in coords]
+
+        loc = {
+            'pos': {
+                'coords':  coords,
+                'qf': 100,
+                'valid': True,
+            },
+            'ts_s': ts_s,
+            'ts_us': ts_us,
+        }
+
+        coords = np.array([int(v) for v in coords])
+        for anchor in anchors:
+            acoords = np.array(anchor['pos']['coords'])
+
+            # Find distance from an anchor to a trajectory position
+            vec = coords - acoords
+            dist = np.sqrt(vec.dot(vec))
+            dist += np.random.normal(0, noise_std)
+
+            anchor['dist'] = {
+                'dist': int(dist),
+                'qf': 100,
+            }
+
+        loc['anchors'] = anchors
+        send_dwm_data(loc)
+
+        # Frequency to duration
+        delay = 1 / 5
+        print("cur time: {} delay: {}".format(float(ts), delay))
+        time.sleep(delay)
 
 if __name__ == '__main__':
     args = docopt(__doc__)
@@ -169,7 +257,7 @@ if __name__ == '__main__':
     parot_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     data_file = open(args['--file'], 'r')
 
-    if args['--trajectory']:
-        parse_trajectory_file(data_file)
-    else:
+    if args['parse-log']:
         parse_log_file(data_file)
+    elif args['parse-trajectory']:
+        parse_trajectory_file(args, data_file)
