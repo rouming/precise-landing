@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
 
+"""Localization script with all the math
+
+Usage:
+  location.py --data-source <source>
+
+Options:
+  -h --help                  Show this screen
+  --data-source <source>     Should be 'ble' or 'sock'
+"""
+
+from docopt import docopt
 import time
 import math
 import socket
@@ -32,7 +43,7 @@ from scipy.signal import savgol_filter
 #X_f, Y_f, Z_f = wiener(np.array([X_lse, Y_lse, Z_lse]))
 from scipy.ndimage import gaussian_filter1d
 
-
+args        = None
 dwm_fd      = None
 nano33_fd   = None
 parrot_sock = None
@@ -74,7 +85,6 @@ class dwm_source(enum.Enum):
     SOCK = 1,
 
 DWM_DATA_SOURCE = dwm_source.BLE
-#DWM_DATA_SOURCE = dwm_source.SOCK
 
 class len_log:
     def __init__(self):
@@ -572,6 +582,15 @@ def calc_pos(X0, loc):
     #res = optimize.shgo(func1, bounds=[(-10, 10), (-10, 10), (0, 10)], args=(la, lb, lc, ld),n=200, iters=5, sampling_method='sobol')
     #res = minimize(func1, X0, method='BFGS', options={'disp': True}, args=(la, lb, lc, ld))
     return res.x
+
+args = docopt(__doc__)
+if args['--data-source'] == 'sock':
+    DWM_DATA_SOURCE = dwm_source.SOCK
+elif args['--data-source'] == 'ble':
+    DWM_DATA_SOURCE = dwm_source.BLE
+else:
+    print("Error: incorrect --data-source param, should be 'ble' or 'sock'")
+    sys.exit(-1)
 
 avg_rate = avg_rate()
 navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y)
