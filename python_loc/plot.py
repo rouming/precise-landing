@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
 
+"""Plot data from location.py script
+
+Usage:
+  plot.py [--plot3d] [--filter]
+
+Options:
+  -h --help              Show this screen
+  --plot3d               Plot 3D scene
+  --filter               Filter data
+"""
+
+from docopt import docopt
 import socket
 import struct
 import select
@@ -18,10 +30,8 @@ X_LIM = 3
 Y_LIM = 3
 Z_LIM = 3
 
-DRAW_3D_SCENE = False
-PLOT_FILTERED = False
-
 parrot_data = None
+args = None
 
 class dynamic_dist_plot():
     # Time range in seconds
@@ -168,7 +178,7 @@ class dynamic_plot():
         self.lines1, = self.ax.plot([],[], '-', label=lines1_label)
         self.lines2, = self.ax.plot([],[], '-', label=lines2_label)
 
-        if PLOT_FILTERED:
+        if args['--filter']:
             self.filtered1, = self.ax.plot([],[], '-', label="Savgol")
             self.filtered2, = self.ax.plot([],[], '-', label="Uniform")
 
@@ -187,7 +197,7 @@ class dynamic_plot():
         while first < last - width:
             self.xdata.pop(0)
             self.ydata.pop(0)
-            if PLOT_FILTERED:
+            if args['--filter']:
                 self.ydata_filtered1.pop(0)
                 self.ydata_filtered2.pop(0)
             first = self.xdata[0]
@@ -195,7 +205,7 @@ class dynamic_plot():
     def update(self, xdata, ydata, ydata_filtered1, ydata_filtered2, text):
         self.xdata.append(xdata)
         self.ydata.append(ydata)
-        if PLOT_FILTERED:
+        if args['--filter']:
             self.ydata_filtered1.append(ydata_filtered1)
             self.ydata_filtered2.append(ydata_filtered2)
 
@@ -216,7 +226,7 @@ class dynamic_plot():
         self.lines2.set_xdata([self.min_x, self.max_x])
         self.lines2.set_ydata([self.lines2_y, self.lines2_y])
 
-        if PLOT_FILTERED:
+        if args['--filter']:
             self.filtered1.set_xdata(self.xdata)
             self.filtered1.set_ydata(self.ydata_filtered1)
 
@@ -300,6 +310,8 @@ def recv_math_output(sock):
     return *data, dropped
 
 if __name__ == '__main__':
+    args = docopt(__doc__)
+
     # Remove toolback with buttons from plots. This is needed because
     # when drone is being controlled with the keyboard plots react
     # on button press.
@@ -318,7 +330,7 @@ if __name__ == '__main__':
     len_plot = dynamic_dist_plot("Anchors dist", "Time (s)", "Drone distance (m)")
 
     # Create 3D plot
-    if DRAW_3D_SCENE:
+    if args['--plot3d']:
         fig3d = plt.figure()
         ax3d = fig3d.add_subplot(111, projection='3d')
 
@@ -350,7 +362,7 @@ if __name__ == '__main__':
         Y_f1 = 0.0
         Y_f2 = 0.0
 
-        if PLOT_FILTERED:
+        if args['--filter']:
             moving_window = 15
 
             if len(X) < moving_window:
@@ -391,5 +403,5 @@ if __name__ == '__main__':
                         [dist1, dist2, dist3, dist4])
 
         # Draw 3d scene
-        if DRAW_3D_SCENE:
+        if args['--plot3d']:
             draw_scene(ax3d, X, Y, Z, parrot_alt, ts, nr_anchors)
