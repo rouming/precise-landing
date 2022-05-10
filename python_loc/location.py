@@ -622,10 +622,7 @@ def filter_dist(loc):
             anch_len_log[addr] = len_log()
 
         anch_len_log[addr].add_to_filter(dist, ts)
-
-        print("dist before filtering %.4f" % dist)
         anch["dist"]["dist"] = anch_len_log[addr].get_last_filtered()
-        print("dist after filtering %.4f" % anch["dist"]["dist"])
 
 def sigint_handler(sig, frame):
     print(' You pressed Ctrl+C! Disconnecting all devices, please wait ...')
