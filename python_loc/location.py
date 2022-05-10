@@ -80,9 +80,19 @@ total_calc = 0
 
 PID_CONTROL_RATE_HZ = 2
 
+class filter(enum.Enum):
+    NO_FILTER = 0,
+    SAVGOL    = 1,
+    UNIFORM   = 2,
+    GAUSSIAN  = 3,
+
 class dwm_source(enum.Enum):
     BLE = 0,
     SOCK = 1,
+
+
+pre_filter  = filter.NO_FILTER
+post_filter = filter.NO_FILTER
 
 DWM_DATA_SOURCE = dwm_source.BLE
 
@@ -95,10 +105,9 @@ class len_log:
         self.data.append(l)
         self.T.append(ts)
 
-        apply_filter = 2
-        if apply_filter == 1 and len(self.data) > moving_window:
+        if pre_filter == filter.UNIFORM and len(self.data) > moving_window:
             self.data = list(uniform_filter1d(self.data, size=moving_window, mode="reflect"))
-        if apply_filter == 2:
+        if pre_filter == filter.GAUSSIAN:
             self.data = list(gaussian_filter1d(self.data, 6))
 
         #print(self.data)
@@ -110,7 +119,6 @@ class len_log:
         return self.data
 
     def get_last_filtered(self):
-        apply_filter = 1
         res = self.data[-1]
 
         return res
@@ -669,10 +677,8 @@ while True:
             continue
 
         X_calc = X_kalman
-        apply_filter = 0
     else:
         X_calc = calc_pos(X0, loc)
-        apply_filter = 2
 
     print("calc time {}".format(time.time() - start))
 
@@ -693,17 +699,17 @@ while True:
         Z_lse.pop(0)
         T.pop(0)
 
-    if apply_filter:
+    if post_filter != filter.NO_FILTER:
         moving_window = 15
 
         if len(X_lse) < moving_window:
             continue
 
-        if apply_filter == 1:
+        if post_filter == filter.SAVGOL:
             X_filtered = savgol_filter(X_lse, moving_window, 5, mode="nearest")
             Y_filtered = savgol_filter(Y_lse, moving_window, 5, mode="nearest")
             Z_filtered = savgol_filter(Z_lse, moving_window, 5, mode="nearest")
-        else:
+        elif post_filter == filter.UNIFORM:
             X_filtered = uniform_filter1d(X_lse, size=moving_window, mode="reflect")
             Y_filtered = uniform_filter1d(Y_lse, size=moving_window, mode="reflect")
             Z_filtered = uniform_filter1d(Z_lse, size=moving_window, mode="reflect")
