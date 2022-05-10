@@ -3,11 +3,12 @@
 """Plot data from location.py script
 
 Usage:
-  plot.py [--plot3d] [--filter]
+  plot.py [(--plot3d [--plot-true-pos])] [--filter]
 
 Options:
   -h --help              Show this screen
   --plot3d               Plot 3D scene
+  --plot-true-pos        Plot true poistion with green dashed line on a 3D scene
   --filter               Filter data
 """
 
@@ -249,7 +250,7 @@ class dynamic_plot():
 
 
 first_ts = 0
-def draw_scene(ax, X, Y, Z, parrot_alt, ts, anch_cnt):
+def draw_scene(ax, X, Y, Z, true_X, true_Y, true_Z, parrot_alt, ts, anch_cnt):
     global first_ts
     global parrot_data
 
@@ -266,6 +267,8 @@ def draw_scene(ax, X, Y, Z, parrot_alt, ts, anch_cnt):
         # plt.plot(X_filtered, Y_filtered, Z_filtered, color='g')
 
         ax.scatter(X, Y, Z, color='r', s=0.8)
+        if args['--plot-true-pos']:
+            ax.scatter(true_X, true_Y, true_Z, color='g', s=0.8)
         ax.scatter(X[-1], Y[-1], Z[-1], color='b', s=5)
 
         ax.text2D(0.0, 1, "     x         y          z", transform=ax.transAxes)
@@ -343,6 +346,10 @@ if __name__ == '__main__':
     Y = []
     Z = []
 
+    true_X = []
+    true_Y = []
+    true_Z = []
+
     start_ts = 0.0
 
     while True:
@@ -356,6 +363,10 @@ if __name__ == '__main__':
         X.append(x)
         Y.append(y)
         Z.append(z)
+
+        true_X.append(true_x)
+        true_Y.append(true_y)
+        true_Z.append(true_z)
 
         X_f1 = 0.0
         X_f2 = 0.0
@@ -404,4 +415,5 @@ if __name__ == '__main__':
 
         # Draw 3d scene
         if args['--plot3d']:
-            draw_scene(ax3d, X, Y, Z, parrot_alt, ts, nr_anchors)
+            draw_scene(ax3d, X, Y, Z, true_X, true_Y, true_Z,
+                       parrot_alt, ts, nr_anchors)
