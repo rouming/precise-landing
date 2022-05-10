@@ -227,7 +227,6 @@ def parse_trajectory_file(args, data_file):
             'ts_us': ts_us,
         }
 
-        coords = np.array([int(v) for v in coords])
         for anchor in anchors:
             acoords = np.array(anchor['pos']['coords'])
 
