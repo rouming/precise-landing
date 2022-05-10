@@ -19,6 +19,17 @@ initialized = False
 m_tao_acc_sqrt = 0.3
 m_tao_bias_sqrt = 0.01
 
+#
+# State vector
+#
+# X_6 = [Px, Vx, Py, Vy, Pz, Vz]
+# X_9 = [Px, Vx, Ax, Py, Vy, Ay, Pz, Vz, Az]
+#
+# where P - position,
+#       V - velocity
+#       A - acceleration
+#
+
 def generate_F_6(T):
     F = np.array([[1, T, 0, 0, 0, 0],
                   [0, 1, 0, 0, 0, 0],
