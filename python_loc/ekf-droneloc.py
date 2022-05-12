@@ -97,7 +97,7 @@ def H_6(Xk, loc):
         anch_z = coords[2]
 
         anch = np.array([anch_x, 0, anch_y, 0, anch_z, 0])
-        pos = np.array([Xk[0][0], 0, Xk[2][0], 0, Xk[4][0], 0])
+        pos = np.array([Xk[0], 0, Xk[2], 0, Xk[4], 0])
         r = np.linalg.norm(pos - anch) + 1e-6
         h_row = (pos - anch) / r
         H = np.append(H, [h_row], axis=0)
@@ -118,11 +118,11 @@ def Hx_6(x, loc):
         anch_z = coords[2]
 
         anch = np.array([anch_x, anch_y, anch_z])
-        pos = np.array([x[0][0], x[2][0], x[4][0]])
+        pos = np.array([x[0], x[2], x[4]])
         r = np.linalg.norm(pos - anch) + 1e-6
         r_pred.append(r)
 
-    return np.array([r_pred]).T
+    return np.array(r_pred).T
 
 
 def get_measurements(loc):
@@ -131,7 +131,7 @@ def get_measurements(loc):
         dist = anchor["dist"]["dist"]
         ranges.append(dist)
 
-    return np.array([ranges]).T
+    return np.array(ranges).T
 
 
 def ekf6_process(ekf, loc, dt):
@@ -162,8 +162,8 @@ def ekf6_process(ekf, loc, dt):
     ekf.update(z, HJacobian=H_6, Hx=Hx_6, args=loc, hx_args=loc)
     #Xk, P = filterpy.kalman.update(Xk, P, z, R, H)
 
-    if ekf.x[4][0] < 0:
-        ekf.x[4][0] = np.abs(ekf.x[4][0])
+    if ekf.x[4] < 0:
+        ekf.x[4] = np.abs(ekf.x[4])
 
     if np.any(np.abs(ekf.y) > 2):
         print("innovation is too large: ", ekf.y)
@@ -172,7 +172,7 @@ def ekf6_process(ekf, loc, dt):
         return None
     Xk = ekf.x
 
-    return [Xk[0][0], Xk[2][0], Xk[4][0]]
+    return [Xk[0], Xk[2], Xk[4]]
 
 
 def get_anchors_coords(anchors):
@@ -200,7 +200,7 @@ if __name__ == '__main__':
         noise_std = float(args['--noise-std'])
 
     ekf6 = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
-    ekf6.x = np.array([[1], [0], [1], [0], [1], [0]])
+    ekf6.x = np.array([1, 0, 1, 0, 1, 0])
 
     # Plot anchors
     anchors_coords = get_anchors_coords(anchors)
@@ -247,11 +247,11 @@ if __name__ == '__main__':
         plt.plot(coords[0], coords[1], ',', color='g')
 
         # Plot filtered position
-        plt.plot(ekf6.x[0,0], ekf6.x[2,0], ',', color='r')
+        plt.plot(ekf6.x[0], ekf6.x[2], ',', color='r')
 
         if n % 100 == 0:
             # Extract X (Px, Py) and P (Px, Py)
-            plot_covariance_ellipse((ekf6.x[0,0], ekf6.x[2,0]),
+            plot_covariance_ellipse((ekf6.x[0], ekf6.x[2]),
                                     ekf6.P[0:3:2, 0:3:2],
                                     std=10, facecolor='g', alpha=0.3)
         n += 1
