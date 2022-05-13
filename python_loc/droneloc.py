@@ -1,9 +1,10 @@
 #!/usr/bin/python3
 
-"""EKF drone localization
+"""Drone localization
 
 Usage:
-  ekf-droneloc.py --trajectory <file> [--noise-std <sigma>] [--seed <seed>]
+  droneloc.py ekf --trajectory <file> [--noise-std <sigma>] [--seed <seed>]
+  droneloc.py ukf --trajectory <file> [--noise-std <sigma>] [--seed <seed>]
 
 Options:
   -h --help              Show this screen.
@@ -27,7 +28,13 @@ from filterpy.stats import plot_covariance_ellipse
 from scipy.linalg import block_diag
 import filterpy.kalman
 import time
+import enum
 
+class kalman_type(enum.Enum):
+    EKF    = 0,
+    UKF    = 1,
+
+kf_type = kalman_type.EKF
 sigma_a = 0.125
 sigma_r = 0.2
 m_R_scale = 1
@@ -63,7 +70,7 @@ anchors = [
 #       A - acceleration
 #
 
-def F_6(dt):
+def ekf_F_6(dt):
     F = np.array([[1, dt,  0,  0,  0, 0],
                   [0,  1,  0,  0,  0, 0],
                   [0,  0,  1, dt,  0, 0],
@@ -72,6 +79,17 @@ def F_6(dt):
                   [0,  0,  0,  0,  0, 1]
                   ])
     return F
+
+
+def ukf_F_6(x, dt):
+    F = np.array([[1, dt,  0,  0,  0, 0],
+                  [0,  1,  0,  0,  0, 0],
+                  [0,  0,  1, dt,  0, 0],
+                  [0,  0,  0,  1,  0, 0],
+                  [0,  0,  0,  0,  1, dt],
+                  [0,  0,  0,  0,  0, 1]
+                  ])
+    return F @ x
 
 
 def Q_6(dt):
@@ -86,7 +104,7 @@ def Q_6(dt):
     return Q
 
 
-def H_6(Xk, loc):
+def ekf_H_6(Xk, loc):
     """ compute Jacobian of H matrix for state X """
 
     H = np.empty([0, 6])
@@ -134,43 +152,46 @@ def get_measurements(loc):
     return np.array(ranges).T
 
 
-def ekf6_process(ekf, loc, dt):
+def kf_process(kf, loc, dt):
     global initialized
 
     if not initialized:
         # set cov of vel
-        ekf.P[1][1] = 0.1
-        ekf.P[3][3] = 0.1
-        ekf.P[5][5] = 0.1
+        kf.P[1][1] = 0.1
+        kf.P[3][3] = 0.1
+        kf.P[5][5] = 0.1
         initialized = True
 
-    old_x = ekf.x
-    old_P = ekf.P
+    old_x = kf.x
+    old_P = kf.P
     R = np.eye(len(loc["anchors"])) * (sigma_r**2 * m_R_scale)
 
-    ekf.F = F_6(dt)
-    ekf.Q = Q_6(dt)
+    if kf_type == kalman_type.EKF:
+        kf.F = ekf_F_6(dt)
+    kf.Q = Q_6(dt)
 
-    ekf.dim_z = len(loc['anchors'])
+    kf.dim_z = len(loc['anchors'])
 
-    ekf.predict()
+    kf.predict()
 
-    #Xk, P = filterpy.kalman.predict(Xk, P, F, Q)
     z = get_measurements(loc)
 
-    ekf.R = R
-    ekf.update(z, HJacobian=H_6, Hx=Hx_6, args=loc, hx_args=loc)
-    #Xk, P = filterpy.kalman.update(Xk, P, z, R, H)
+    kf.R = R
 
-    if ekf.x[4] < 0:
-        ekf.x[4] = np.abs(ekf.x[4])
+    if kf_type == kalman_type.EKF:
+        kf.update(z, HJacobian=ekf_H_6, Hx=Hx_6, args=loc, hx_args=loc)
+    elif kf_type == kf_type.UKF:
+        kf.update(z, loc=loc)
 
-    if np.any(np.abs(ekf.y) > 2):
-        print("innovation is too large: ", ekf.y)
-        ekf.x = old_x
-        ekf.P = old_P
+    if kf.x[4] < 0:
+        kf.x[4] = np.abs(kf.x[4])
+
+    if np.any(np.abs(kf.y) > 2):
+        print("innovation is too large: ", kf.y)
+        kf.x = old_x
+        kf.P = old_P
         return None
-    Xk = ekf.x
+    Xk = kf.x
 
     return [Xk[0], Xk[2], Xk[4]]
 
@@ -187,6 +208,11 @@ if __name__ == '__main__':
     args = docopt(__doc__)
     data_file = open(args['--trajectory'], 'r')
 
+    if args['ekf']:
+        kf_type = kalman_type.EKF
+    elif args['ukf']:
+        kf_type = kalman_type.UKF
+
     seed = 0
     if args['--seed']:
         seed = int(args['--seed'])
@@ -199,8 +225,14 @@ if __name__ == '__main__':
     if args['--noise-std']:
         noise_std = float(args['--noise-std'])
 
-    ekf6 = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
-    ekf6.x = np.array([1, 0, 1, 0, 1, 0])
+    if kf_type == kalman_type.EKF:
+        kf = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
+    elif kf_type == kalman_type.UKF:
+        points = filterpy.kalman.MerweScaledSigmaPoints(n=6, alpha=.1, beta=2, kappa=0)
+        kf = filterpy.kalman.UnscentedKalmanFilter(dim_x=6, dim_z=1, fx=ukf_F_6, hx=Hx_6,
+                                                   dt=dt, points=points)
+
+    kf.x = np.array([1, 0, 1, 0, 1, 0])
 
     # Plot anchors
     anchors_coords = get_anchors_coords(anchors)
@@ -241,18 +273,18 @@ if __name__ == '__main__':
 
         loc['anchors'] = anchors
 
-        ekf6_process(ekf6, loc, dt)
+        kf_process(kf, loc, dt)
 
         # Plot true drone position
         plt.plot(coords[0], coords[1], ',', color='g')
 
         # Plot filtered position
-        plt.plot(ekf6.x[0], ekf6.x[2], ',', color='r')
+        plt.plot(kf.x[0], kf.x[2], ',', color='r')
 
         if n % 100 == 0:
             # Extract X (Px, Py) and P (Px, Py)
-            plot_covariance_ellipse((ekf6.x[0], ekf6.x[2]),
-                                    ekf6.P[0:3:2, 0:3:2],
+            plot_covariance_ellipse((kf.x[0], kf.x[2]),
+                                    kf.P[0:3:2, 0:3:2],
                                     std=10, facecolor='g', alpha=0.3)
         n += 1
 
