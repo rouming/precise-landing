@@ -75,7 +75,7 @@ def F_6(dt):
 
 
 def Q_6(dt):
-    #Q = Q_discrete_white_noise(dim=2, dt=dt, var=sigma_a**2, block_size=3)
+    #Q = filterpy.common.Q_discrete_white_noise(dim=2, dt=dt, var=sigma_a**2, block_size=3)
     q = [[dt**4 / 3, dt**3 / 2],
          [dt**3 / 2, dt**2]]
     qz = np.array(q) * m_z_damping_factor
