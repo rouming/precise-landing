@@ -25,8 +25,8 @@ import sys
 import signal
 
 import filterpy.kalman
-from kalman import ekf_6
-from kalman import ekf_9
+from droneloc import drone_localization
+from droneloc import kalman_type
 
 import dwm1001_ble
 import nano33ble
@@ -606,12 +606,8 @@ plot_sock = create_plot_sock()
 
 navigator.start()
 
-if cfg.USE_KALMAN:
-    ekf6 = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
-    ekf6.x = np.array([[1], [0], [1], [0], [1], [0]])
-
-    ekf9 = filterpy.kalman.ExtendedKalmanFilter(dim_x=9, dim_z=4, dim_u=9)
-    ekf9.x = np.array([[1], [0], [0], [1], [0], [0], [1], [0], [0]])
+if cfg.KALMAN_TYPE is not None:
+    droneloc = drone_localization(cfg.KALMAN_TYPE)
 
 def filter_dist(loc):
     for anch in loc["anchors"]:
@@ -662,18 +658,10 @@ while True:
     #
     # Choose what calculation method to use
     #
-    if cfg.USE_KALMAN:
-        if cfg.USE_KALMAN == cfg.kalman_type.EKF6:
-            X_kalman = ekf_6(ekf6, loc)
-        elif cfg.USE_KALMAN == cfg.kalman_type.EKF9:
-            X_kalman = ekf_9(ekf9, loc, nano_data)
-        else:
-            assert(0)
-
-        if X_kalman == None:
+    if cfg.KALMAN_TYPE is not None:
+        X_calc = droneloc.kf_process(loc, nano_data)
+        if X_calc is None:
             continue
-
-        X_calc = X_kalman
     else:
         X_calc = calc_pos(X0, loc)
 

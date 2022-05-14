@@ -2,14 +2,11 @@
 
 import numpy as np
 import enum
-
-class kalman_type(enum.Enum):
-    EKF6 = 0,
-    EKF9 = 1,
+from droneloc import kalman_type
 
 # Do we use kalman
-USE_KALMAN = kalman_type.EKF6
-# USE_KALMAN = None
+KALMAN_TYPE = kalman_type.EKF6
+# KALMAN_TYPE = None
 
 # Distances from DWM1001-server
 MCAST_GRP = '224.1.1.1'

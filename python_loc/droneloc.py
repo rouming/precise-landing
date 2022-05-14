@@ -261,7 +261,7 @@ class drone_localization():
         self.dt = dt
 
 
-    def get_dt(self):
+    def get_dt(self, loc):
         dt = 0.1
         if self.dt is None:
             if self.process_ts is not None:
@@ -277,7 +277,7 @@ class drone_localization():
         old_x = self.kf.x
         old_P = self.kf.P
         R = np.eye(len(loc["anchors"])) * (sigma_r**2 * m_R_scale)
-        dt = self.get_dt()
+        dt = self.get_dt(loc)
 
         if self.kf_type == kalman_type.EKF6:
             self.kf.F = ekf_F_6(dt)
