@@ -3,16 +3,17 @@
 """Drone localization
 
 Usage:
-  droneloc.py ekf --trajectory <file> [--noise-std <sigma>] [--seed <seed>]
-  droneloc.py ukf --trajectory <file> [--noise-std <sigma>] [--seed <seed>]
+  droneloc.py ekf --trajectory <file> [--post-smoother <smoother>] [--noise-std <sigma>] [--seed <seed>]
+  droneloc.py ukf --trajectory <file> [--post-smoother <smoother>] [--noise-std <sigma>] [--seed <seed>]
 
 Options:
-  -h --help              Show this screen.
-  --trajectory <file>    File of the drone trajectory.
-  --noise-std <sigma>    Add gaussian noise in mm to the anchor calculated distance,
-                         e.g. standard deviation of real a DWM1001 device can vary
-                         from 20mm to 200mm.
-  --seed <seed>          Seed value for the random generator. 0 is the default value.
+  -h --help                  Show this screen.
+  --trajectory <file>        File of the drone trajectory.
+  --post-smoother <smoother> Smoother after kalman processing, can be: savgol, uniform, gaussian
+  --noise-std <sigma>        Add gaussian noise in mm to the anchor calculated distance,
+                             e.g. standard deviation of real a DWM1001 device can vary
+                             from 20mm to 200mm.
+  --seed <seed>              Seed value for the random generator. 0 is the default value.
 
 """
 
@@ -26,6 +27,9 @@ from numpy.random import randn
 import random
 from filterpy.stats import plot_covariance_ellipse
 from scipy.linalg import block_diag
+from scipy.ndimage import uniform_filter1d
+from scipy.ndimage import gaussian_filter1d
+from scipy.signal import savgol_filter
 import filterpy.kalman
 import time
 import enum
@@ -35,6 +39,13 @@ class kalman_type(enum.Enum):
     EKF9   = 1,
     UKF6   = 2,
 
+
+class smoother_type(enum.Enum):
+    SAVGOL   = 0,
+    UNIFORM  = 1,
+    GAUSSIAN = 2,
+
+
 sigma_a = 0.125
 sigma_r = 0.2
 m_R_scale = 1
@@ -42,6 +53,7 @@ m_Q_scale = 1
 m_z_damping_factor = 1
 
 dt = 0.2
+hist_window = 25
 
 anchors = [
     # Less error in covariance matrix if anchors stay apart
@@ -237,8 +249,10 @@ class drone_localization():
     kf = None
     dt = None
     process_ts = None
+    post_smoother = None
+    x_hist = []
 
-    def __init__(self, kf_type, dt=None):
+    def __init__(self, kf_type, dt=None, post_smoother=None):
         if kf_type == kalman_type.EKF6:
             kf = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
             kf.x = np.array([1, 0, 1, 0, 1, 0])
@@ -259,6 +273,7 @@ class drone_localization():
         self.kf_type = kf_type
         self.kf = kf
         self.dt = dt
+        self.post_smoother = post_smoother
 
 
     def get_dt(self, loc):
@@ -317,6 +332,25 @@ class drone_localization():
 
         Xk = self.kf.x
 
+        if self.post_smoother is not None:
+            if len(self.x_hist) > hist_window:
+                self.x_hist.pop(0)
+
+            self.x_hist.append(Xk)
+            if len(self.x_hist) < hist_window:
+                return None
+
+            if self.post_smoother == smoother_type.SAVGOL:
+                Xk_f = savgol_filter(self.x_hist, hist_window, 5,
+                                     axis=0, mode="nearest")
+            elif self.post_smoother == smoother_type.UNIFORM:
+                Xk_f = uniform_filter1d(self.x_hist, size=hist_window,
+                                        axis=0, mode="reflect")
+            elif self.post_smoother == smoother_type.GAUSSIAN:
+                Xk_f = gaussian_filter1d(self.x_hist, sigma=6,
+                                         axis=0, mode="reflect")
+            return [Xk_f[-1, 0], Xk_f[-1, 2], Xk_f[-1, 4]]
+
         return [Xk[0], Xk[2], Xk[4]]
 
 
@@ -337,6 +371,15 @@ if __name__ == '__main__':
     elif args['ukf']:
         kf_type = kalman_type.UKF6
 
+    if args['--post-smoother'] == 'savgol':
+        post_smoother = smoother_type.SAVGOL
+    elif args['--post-smoother'] == 'uniform':
+        post_smoother = smoother_type.UNIFORM
+    elif args['--post-smoother'] == 'gaussian':
+        post_smoother = smoother_type.GAUSSIAN
+    else:
+        post_smoother = None
+
     seed = 0
     if args['--seed']:
         seed = int(args['--seed'])
@@ -349,7 +392,7 @@ if __name__ == '__main__':
     if args['--noise-std']:
         noise_std = float(args['--noise-std'])
 
-    droneloc = drone_localization(kf_type, dt)
+    droneloc = drone_localization(kf_type, dt, post_smoother=post_smoother)
 
     # Plot anchors
     anchors_coords = get_anchors_coords(anchors)
@@ -361,15 +404,15 @@ if __name__ == '__main__':
         if not line:
             break
 
-        coords = line.split(',')
-        if len(coords) != 3:
+        true_coords = line.split(',')
+        if len(true_coords) != 3:
             print("Error: trajectory file is incorrect format")
             sys.exit(-1)
 
-        coords = [float(v)/1000 for v in coords]
+        true_coords = [float(v)/1000 for v in true_coords]
         loc = {
             'pos': {
-                'coords':  coords,
+                'coords':  true_coords,
                 'qf': 100,
                 'valid': True,
             },
@@ -379,7 +422,7 @@ if __name__ == '__main__':
             acoords = np.array(anchor['pos']['coords'])
 
             # Find distance from an anchor to a trajectory position
-            vec = coords - acoords
+            vec = true_coords - acoords
             dist = np.sqrt(vec.dot(vec))
             dist += np.random.normal(0, noise_std/1000.0)
 
@@ -390,17 +433,19 @@ if __name__ == '__main__':
 
         loc['anchors'] = anchors
 
-        droneloc.kf_process(loc)
+        coords = droneloc.kf_process(loc)
+        if coords is None:
+            continue
 
         # Plot true drone position
-        plt.plot(coords[0], coords[1], ',', color='g')
+        plt.plot(true_coords[0], true_coords[1], ',', color='g')
 
         # Plot filtered position
-        plt.plot(droneloc.kf.x[0], droneloc.kf.x[2], ',', color='r')
+        plt.plot(coords[0], coords[1], ',', color='r')
 
         if n % 100 == 0:
             # Extract X (Px, Py) and P (Px, Py)
-            plot_covariance_ellipse((droneloc.kf.x[0], droneloc.kf.x[2]),
+            plot_covariance_ellipse((coords[0], coords[1]),
                                     droneloc.kf.P[0:3:2, 0:3:2],
                                     std=10, facecolor='g', alpha=0.3)
         n += 1
