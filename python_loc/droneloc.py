@@ -154,8 +154,10 @@ def get_measurements(loc):
 class drone_localization():
     kf_type = None
     kf = None
+    dt = None
+    process_ts = None
 
-    def __init__(self, kf_type):
+    def __init__(self, kf_type, dt=None):
         if kf_type == kalman_type.EKF6:
             kf = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
         elif kf_type == kalman_type.UKF6:
@@ -172,12 +174,26 @@ class drone_localization():
 
         self.kf_type = kf_type
         self.kf = kf
+        self.dt = dt
 
 
-    def kf_process(self, loc, dt):
+    def get_dt(self):
+        dt = 0.1
+        if self.dt is None:
+            if self.process_ts is not None:
+                dt = loc["ts"] - self.process_ts
+            self.process_ts = loc["ts"]
+        else:
+            dt = self.dt
+
+        return dt
+
+
+    def kf_process(self, loc):
         old_x = self.kf.x
         old_P = self.kf.P
         R = np.eye(len(loc["anchors"])) * (sigma_r**2 * m_R_scale)
+        dt = self.get_dt()
 
         if self.kf_type == kalman_type.EKF6:
             self.kf.F = ekf_F_6(dt)
@@ -185,7 +201,10 @@ class drone_localization():
 
         self.kf.dim_z = len(loc['anchors'])
 
-        self.kf.predict()
+        if self.kf_type == kalman_type.UKF6:
+            self.kf.predict(dt=dt)
+        else:
+            self.kf.predict()
 
         z = get_measurements(loc)
 
@@ -239,7 +258,7 @@ if __name__ == '__main__':
     if args['--noise-std']:
         noise_std = float(args['--noise-std'])
 
-    droneloc = drone_localization(kf_type)
+    droneloc = drone_localization(kf_type, dt)
 
     # Plot anchors
     anchors_coords = get_anchors_coords(anchors)
@@ -280,7 +299,7 @@ if __name__ == '__main__':
 
         loc['anchors'] = anchors
 
-        droneloc.kf_process(loc, dt)
+        droneloc.kf_process(loc)
 
         # Plot true drone position
         plt.plot(coords[0], coords[1], ',', color='g')
