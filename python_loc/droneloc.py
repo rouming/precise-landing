@@ -31,8 +31,9 @@ import time
 import enum
 
 class kalman_type(enum.Enum):
-    EKF    = 0,
-    UKF    = 1,
+    EKF6   = 0,
+    EKF9   = 1,
+    UKF6   = 2,
 
 sigma_a = 0.125
 sigma_r = 0.2
@@ -155,9 +156,9 @@ class drone_localization():
     kf = None
 
     def __init__(self, kf_type):
-        if kf_type == kalman_type.EKF:
+        if kf_type == kalman_type.EKF6:
             kf = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
-        elif kf_type == kalman_type.UKF:
+        elif kf_type == kalman_type.UKF6:
             points = filterpy.kalman.MerweScaledSigmaPoints(n=6, alpha=.1, beta=2, kappa=0)
             kf = filterpy.kalman.UnscentedKalmanFilter(dim_x=6, dim_z=4, fx=ukf_F_6, hx=Hx_6,
                                                        dt=dt, points=points)
@@ -178,7 +179,7 @@ class drone_localization():
         old_P = self.kf.P
         R = np.eye(len(loc["anchors"])) * (sigma_r**2 * m_R_scale)
 
-        if self.kf_type == kalman_type.EKF:
+        if self.kf_type == kalman_type.EKF6:
             self.kf.F = ekf_F_6(dt)
         self.kf.Q = Q_6(dt)
 
@@ -190,9 +191,9 @@ class drone_localization():
 
         self.kf.R = R
 
-        if self.kf_type == kalman_type.EKF:
+        if self.kf_type == kalman_type.EKF6:
             self.kf.update(z, HJacobian=ekf_H_6, Hx=Hx_6, args=loc, hx_args=loc)
-        elif self.kf_type == kalman_type.UKF:
+        elif self.kf_type == kalman_type.UKF6:
             self.kf.update(z, loc=loc)
 
         if self.kf.x[4] < 0:
@@ -222,9 +223,9 @@ if __name__ == '__main__':
     data_file = open(args['--trajectory'], 'r')
 
     if args['ekf']:
-        kf_type = kalman_type.EKF
+        kf_type = kalman_type.EKF6
     elif args['ukf']:
-        kf_type = kalman_type.UKF
+        kf_type = kalman_type.UKF6
 
     seed = 0
     if args['--seed']:
