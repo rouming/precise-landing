@@ -27,6 +27,7 @@ import signal
 import filterpy.kalman
 from droneloc import drone_localization
 from droneloc import kalman_type
+from droneloc import smoother_type
 
 import dwm1001_ble
 import nano33ble
@@ -37,11 +38,9 @@ from scipy.optimize import minimize
 from simple_pid import PID
 import config as cfg
 
-from scipy.ndimage.filters import uniform_filter1d
-from scipy.signal.signaltools import wiener
 from scipy.signal import savgol_filter
-#X_f, Y_f, Z_f = wiener(np.array([X_lse, Y_lse, Z_lse]))
 from scipy.ndimage import gaussian_filter1d
+from scipy.ndimage import uniform_filter1d
 
 args        = None
 dwm_fd      = None
@@ -61,18 +60,6 @@ should_stop = False
 stop_efd    = eventfd.EventFD()
 
 anch_len_log = {}
-
-X_lse = []
-Y_lse = []
-Z_lse = []
-T = []
-
-X_filtered = []
-Y_filtered = []
-Z_filtered = []
-
-moving_window = 21
-
 hist_len_sec = 5
 
 total_pos = 0
@@ -80,19 +67,13 @@ total_calc = 0
 
 PID_CONTROL_RATE_HZ = 2
 
-class filter(enum.Enum):
-    NO_FILTER = 0,
-    SAVGOL    = 1,
-    UNIFORM   = 2,
-    GAUSSIAN  = 3,
-
 class dwm_source(enum.Enum):
     BLE = 0,
     SOCK = 1,
 
 
-pre_filter  = filter.NO_FILTER
-post_filter = filter.NO_FILTER
+pre_smoother  = None
+post_smoother = None
 
 DWM_DATA_SOURCE = dwm_source.BLE
 
@@ -105,12 +86,11 @@ class len_log:
         self.data.append(l)
         self.T.append(ts)
 
-        if pre_filter == filter.UNIFORM and len(self.data) > moving_window:
+        if pre_smoother == smoother_type.UNIFORM and len(self.data) > moving_window:
             self.data = list(uniform_filter1d(self.data, size=moving_window, mode="reflect"))
-        if pre_filter == filter.GAUSSIAN:
+        if pre_smoother == smoother_type.GAUSSIAN:
             self.data = list(gaussian_filter1d(self.data, 6))
 
-        #print(self.data)
         while (len(self.T) > 0) and (ts - self.T[0] > hist_len_sec):
             self.data.pop(0)
             self.T.pop(0)
@@ -607,7 +587,7 @@ plot_sock = create_plot_sock()
 navigator.start()
 
 if cfg.KALMAN_TYPE is not None:
-    droneloc = drone_localization(cfg.KALMAN_TYPE)
+    droneloc = drone_localization(cfg.KALMAN_TYPE, post_smoother=post_smoother)
 
 def filter_dist(loc):
     for anch in loc["anchors"]:
@@ -664,48 +644,17 @@ while True:
             continue
     else:
         X_calc = calc_pos(X0, loc)
+        X0 = X_calc
 
     print("calc time {}".format(time.time() - start))
 
-    X0 = X_calc
-    X_lse.append(X_calc[0])
-    Y_lse.append(X_calc[1])
-    #Z_lse.append(X_calc[2])
     if parrot_data is not None and (ts - parrot_data["ts"] < 2):
         parrot_alt = parrot_data["alt"]
-        Z_lse.append(parrot_data["alt"])
-    else:
-        Z_lse.append(X_calc[2])
-    T.append(ts)
+        X_calc[2] = parrot_alt
 
-    while ts - T[0] > hist_len_sec:
-        X_lse.pop(0)
-        Y_lse.pop(0)
-        Z_lse.pop(0)
-        T.pop(0)
-
-    if post_filter != filter.NO_FILTER:
-        moving_window = 15
-
-        if len(X_lse) < moving_window:
-            continue
-
-        if post_filter == filter.SAVGOL:
-            X_filtered = savgol_filter(X_lse, moving_window, 5, mode="nearest")
-            Y_filtered = savgol_filter(Y_lse, moving_window, 5, mode="nearest")
-            Z_filtered = savgol_filter(Z_lse, moving_window, 5, mode="nearest")
-        elif post_filter == filter.UNIFORM:
-            X_filtered = uniform_filter1d(X_lse, size=moving_window, mode="reflect")
-            Y_filtered = uniform_filter1d(Y_lse, size=moving_window, mode="reflect")
-            Z_filtered = uniform_filter1d(Z_lse, size=moving_window, mode="reflect")
-    else:
-        X_filtered = X_lse
-        Y_filtered = Y_lse
-        Z_filtered = Z_lse
-
-    xf = X_filtered[-1]
-    yf = Y_filtered[-1]
-    zf = Z_filtered[-1]
+    xf = X_calc[0]
+    yf = X_calc[1]
+    zf = X_calc[2]
 
     f_pos = func1(np.array([x, y, z]), loc)
     c_pos = func1([xf, yf, zf], loc)
