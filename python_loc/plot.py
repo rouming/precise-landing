@@ -22,7 +22,7 @@ import matplotlib as mpl
 from matplotlib.artist import Artist
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
-from scipy.ndimage.filters import uniform_filter1d
+from scipy.ndimage import uniform_filter1d
 from scipy.signal import savgol_filter
 
 import config as cfg
