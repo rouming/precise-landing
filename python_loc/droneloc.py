@@ -34,13 +34,11 @@ class kalman_type(enum.Enum):
     EKF    = 0,
     UKF    = 1,
 
-kf_type = kalman_type.EKF
 sigma_a = 0.125
 sigma_r = 0.2
 m_R_scale = 1
 m_Q_scale = 1
 m_z_damping_factor = 1
-initialized = False
 
 dt = 0.2
 
@@ -152,48 +150,63 @@ def get_measurements(loc):
     return np.array(ranges).T
 
 
-def kf_process(kf, loc, dt):
-    global initialized
+class drone_localization():
+    kf_type = None
+    kf = None
 
-    if not initialized:
+    def __init__(self, kf_type):
+        if kf_type == kalman_type.EKF:
+            kf = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
+        elif kf_type == kalman_type.UKF:
+            points = filterpy.kalman.MerweScaledSigmaPoints(n=6, alpha=.1, beta=2, kappa=0)
+            kf = filterpy.kalman.UnscentedKalmanFilter(dim_x=6, dim_z=4, fx=ukf_F_6, hx=Hx_6,
+                                                       dt=dt, points=points)
+
+        kf.x = np.array([1, 0, 1, 0, 1, 0])
+
         # set cov of vel
         kf.P[1][1] = 0.1
         kf.P[3][3] = 0.1
         kf.P[5][5] = 0.1
-        initialized = True
 
-    old_x = kf.x
-    old_P = kf.P
-    R = np.eye(len(loc["anchors"])) * (sigma_r**2 * m_R_scale)
+        self.kf_type = kf_type
+        self.kf = kf
 
-    if kf_type == kalman_type.EKF:
-        kf.F = ekf_F_6(dt)
-    kf.Q = Q_6(dt)
 
-    kf.dim_z = len(loc['anchors'])
+    def kf_process(self, loc, dt):
+        old_x = self.kf.x
+        old_P = self.kf.P
+        R = np.eye(len(loc["anchors"])) * (sigma_r**2 * m_R_scale)
 
-    kf.predict()
+        if self.kf_type == kalman_type.EKF:
+            self.kf.F = ekf_F_6(dt)
+        self.kf.Q = Q_6(dt)
 
-    z = get_measurements(loc)
+        self.kf.dim_z = len(loc['anchors'])
 
-    kf.R = R
+        self.kf.predict()
 
-    if kf_type == kalman_type.EKF:
-        kf.update(z, HJacobian=ekf_H_6, Hx=Hx_6, args=loc, hx_args=loc)
-    elif kf_type == kf_type.UKF:
-        kf.update(z, loc=loc)
+        z = get_measurements(loc)
 
-    if kf.x[4] < 0:
-        kf.x[4] = np.abs(kf.x[4])
+        self.kf.R = R
 
-    if np.any(np.abs(kf.y) > 2):
-        print("innovation is too large: ", kf.y)
-        kf.x = old_x
-        kf.P = old_P
-        return None
-    Xk = kf.x
+        if self.kf_type == kalman_type.EKF:
+            self.kf.update(z, HJacobian=ekf_H_6, Hx=Hx_6, args=loc, hx_args=loc)
+        elif self.kf_type == kalman_type.UKF:
+            self.kf.update(z, loc=loc)
 
-    return [Xk[0], Xk[2], Xk[4]]
+        if self.kf.x[4] < 0:
+            self.kf.x[4] = np.abs(self.kf.x[4])
+
+        if np.any(np.abs(self.kf.y) > 2):
+            print("innovation is too large: ", self.kf.y)
+            self.kf.x = old_x
+            self.kf.P = old_P
+            return None
+
+        Xk = self.kf.x
+
+        return [Xk[0], Xk[2], Xk[4]]
 
 
 def get_anchors_coords(anchors):
@@ -225,14 +238,7 @@ if __name__ == '__main__':
     if args['--noise-std']:
         noise_std = float(args['--noise-std'])
 
-    if kf_type == kalman_type.EKF:
-        kf = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
-    elif kf_type == kalman_type.UKF:
-        points = filterpy.kalman.MerweScaledSigmaPoints(n=6, alpha=.1, beta=2, kappa=0)
-        kf = filterpy.kalman.UnscentedKalmanFilter(dim_x=6, dim_z=1, fx=ukf_F_6, hx=Hx_6,
-                                                   dt=dt, points=points)
-
-    kf.x = np.array([1, 0, 1, 0, 1, 0])
+    droneloc = drone_localization(kf_type)
 
     # Plot anchors
     anchors_coords = get_anchors_coords(anchors)
@@ -273,18 +279,18 @@ if __name__ == '__main__':
 
         loc['anchors'] = anchors
 
-        kf_process(kf, loc, dt)
+        droneloc.kf_process(loc, dt)
 
         # Plot true drone position
         plt.plot(coords[0], coords[1], ',', color='g')
 
         # Plot filtered position
-        plt.plot(kf.x[0], kf.x[2], ',', color='r')
+        plt.plot(droneloc.kf.x[0], droneloc.kf.x[2], ',', color='r')
 
         if n % 100 == 0:
             # Extract X (Px, Py) and P (Px, Py)
-            plot_covariance_ellipse((kf.x[0], kf.x[2]),
-                                    kf.P[0:3:2, 0:3:2],
+            plot_covariance_ellipse((droneloc.kf.x[0], droneloc.kf.x[2]),
+                                    droneloc.kf.P[0:3:2, 0:3:2],
                                     std=10, facecolor='g', alpha=0.3)
         n += 1
 
