@@ -11,6 +11,7 @@ from olympe.messages.ardrone3.PilotingState import (
     PositionChanged,
     AlertStateChanged,
     FlyingStateChanged,
+    SpeedChanged,
     AltitudeChanged,
     AttitudeChanged,
     NavigateHomeStateChanged,
@@ -77,6 +78,7 @@ class FlightListener(olympe.EventListener):
         # Create telemetry sock
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
+        self._vel   = [0,0,0]
         self._alt   = 0.0
         self._roll  = 0.0
         self._pitch = 0.0
@@ -100,17 +102,23 @@ class FlightListener(olympe.EventListener):
 
     @olympe.listen_event(PositionChanged())
     def onPositionChanged(self, event, scheduler):
-        print("latitude = {latitude} longitude = {longitude} altitude = {altitude}".format(**event.args))
+        print("latitude = {latitude:.3f} longitude = {longitude:.3f} altitude = {altitude:.3f}".format(**event.args))
+
+    @olympe.listen_event(SpeedChanged())
+    def onSpeedChanged(self, event, scheduler):
+        print("velocity = [{speedX:.3f},{speedY:.3f},{speedZ:.3f}] ".format(**event.args))
+        self._vel  = [event.args['speedX'], event.args['speedY'], event.args['speedZ']]
+        self.send_parrot_telemetry()
 
     @olympe.listen_event(AltitudeChanged())
     def onAltitudeChanged(self, event, scheduler):
-        print("altitude = {altitude}".format(**event.args))
+        print("altitude = {altitude:.3f}".format(**event.args))
         self._alt  = event.args['altitude']
         self.send_parrot_telemetry()
 
     @olympe.listen_event(AttitudeChanged())
     def onAttitudeChanged(self, event, scheduler):
-        print("roll = {roll}  pitch = {pitch}  yaw = {yaw}".format(**event.args))
+        print("roll = {roll:.3f}  pitch = {pitch:.3f}  yaw = {yaw:.3f}".format(**event.args))
         self._roll  = event.args['roll']
         self._pitch = event.args['pitch']
         self._yaw   = event.args['yaw']
