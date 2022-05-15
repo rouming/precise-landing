@@ -48,10 +48,6 @@ nano33_fd   = None
 parrot_sock = None
 plot_sock   = None
 
-dwm_loc     = None
-parrot_data = None
-nano_data   = None
-
 dwm_manager = None
 
 nano33_manager = None
@@ -71,6 +67,11 @@ class dwm_source(enum.Enum):
     BLE = 0,
     SOCK = 1,
 
+class parrot_event_type(enum.Enum):
+    ALTITUDE = 0,
+    ATTITUDE = 1,
+    VELOCITY = 2,
+    POSITION = 3,
 
 pre_smoother  = None
 post_smoother = None
@@ -417,21 +418,49 @@ def receive_nano33_data():
     return nano33_device.get_data()
 
 def receive_parrot_data_from_sock(sock):
-    fmt = "iiffff"
+    # Header
+    fmt = "iii"
     sz = struct.calcsize(fmt)
-    buf = sock.recv(sz)
-    sec, usec, alt, roll, pitch, yaw = struct.unpack(fmt, buf)
+    buf = sock.recv(sz, socket.MSG_PEEK)
+    event, sec, usec = struct.unpack(fmt, buf)
 
-    parrot_data = {
-        'ts':    float("%ld.%06ld" % (sec, usec)),
-        'alt':   alt,
-        'roll':  roll,
-        'pitch': pitch,
-        'yaw':   yaw
-    }
+    event_type = parrot_event_type(event)
 
-    print("parrot_data: ts=%.6f alt=%f roll=%f pitch=%f yaw=%f" % \
-        (parrot_data['ts'], parrot_data['alt'], parrot_data['roll'], parrot_data['pitch'], parrot_data['yaw']))
+    if event_type == parrot_event_type.ALTITUDE:
+        fmt += "f"
+        sz = struct.calcsize(fmt)
+        buf = sock.recv(sz)
+        _, _, _, alt  = struct.unpack(fmt, buf)
+        if alt == 0.0:
+            return None
+        parrot_data = {'alt': alt}
+    elif event_type == parrot_event_type.VELOCITY:
+        fmt += "fff"
+        sz = struct.calcsize(fmt)
+        buf = sock.recv(sz)
+        _, _, _, x, y, z  = struct.unpack(fmt, buf)
+        if x == 0.0 and y == 0.0 and z == 0.0:
+            return None
+        parrot_data = {'vel': [x, y, z]}
+    elif event_type == parrot_event_type.POSITION:
+        fmt += "fff"
+        sz = struct.calcsize(fmt)
+        buf = sock.recv(sz)
+        _, _, _, lat, lon, alt  = struct.unpack(fmt, buf)
+        # TODO
+        return None
+    elif event_type == parrot_event_type.ATTITUDE:
+        fmt += "fff"
+        sz = struct.calcsize(fmt)
+        buf = sock.recv(sz)
+        _, _, _, roll, pitch, yaw  = struct.unpack(fmt, buf)
+        # TODO
+        return None
+    else:
+        assert(0)
+        return None
+
+    parrot_data['ts'] = float("%ld.%06ld" % (sec, usec))
 
     return parrot_data
 
@@ -459,7 +488,7 @@ def print_location(loc):
     print('')
 
 def get_dwm_location_or_parrot_data():
-    global dwm_fd, nano33_fd, parrot_sock, dwm_loc, parrot_data, nano_data
+    global dwm_fd, nano33_fd, parrot_sock
     global stop_efd
 
     if dwm_fd is None:
@@ -469,12 +498,15 @@ def get_dwm_location_or_parrot_data():
     if parrot_sock is None:
         parrot_sock = create_parrot_sock()
 
-    dwm_received = False
+    received = False
+    dwm_loc     = None
+    parrot_data = None
+    nano_data   = None
 
     # Suck everything from the socket, we need really up-to-date data
     while True:
-        # Wait inifinitely if we don't have reliable DWM location
-        timeout = 0 if dwm_received else None
+        # Wait infinitely if we don't have any data
+        timeout = 0 if received else None
 
         rd, wr, ex = select.select([dwm_fd, nano33_fd, parrot_sock, stop_efd],
                                    [], [], timeout)
@@ -488,10 +520,12 @@ def get_dwm_location_or_parrot_data():
             print_location(loc)
 
             if is_dwm_location_reliable(loc):
-                dwm_received = True
+                received = True
                 dwm_loc = loc
         if parrot_sock in rd:
             parrot_data = receive_parrot_data_from_sock(parrot_sock)
+            if parrot_data is not None:
+                received = True
         if nano33_fd in rd:
             acc, attitude = receive_nano33_data()
 
@@ -614,6 +648,8 @@ while True:
     loc, parrot_data, nano_data = get_dwm_location_or_parrot_data()
     if should_stop:
         break
+    if loc is None:
+        continue
 
     print(">> got calculated position from the engine")
 

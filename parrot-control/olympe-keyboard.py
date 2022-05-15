@@ -67,6 +67,12 @@ AZERTY_CTRL_KEYS.update(
     }
 )
 
+class event_type(Enum):
+    ALTITUDE = 0,
+    ATTITUDE = 1,
+    VELOCITY = 2,
+    POSITION = 3,
+
 UDP_TELEMETRY_IP = '127.0.0.1'
 UDP_TELEMETRY_PORT = 5556
 
@@ -78,22 +84,16 @@ class FlightListener(olympe.EventListener):
         # Create telemetry sock
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-        self._vel   = [0,0,0]
-        self._alt   = 0.0
-        self._roll  = 0.0
-        self._pitch = 0.0
-        self._yaw   = 0.0
-
         super().__init__(drone)
 
-    def send_parrot_telemetry(self):
+    def send_parrot_telemetry(self, event_type, fmt, data):
         ns = time.time_ns()
         usec = ns / 1000
         sec = usec / 1000000
         usec %= 1000000
 
-        buf = struct.pack("iiffff", int(sec), int(usec), self._alt,
-                          self._roll, self._pitch, self._yaw)
+        buf = struct.pack("iii" + fmt, int(event_type.value),
+                          int(sec), int(usec), *data)
         self._sock.sendto(buf, (UDP_TELEMETRY_IP, UDP_TELEMETRY_PORT))
 
     @olympe.listen_event(FlyingStateChanged() | AlertStateChanged() | NavigateHomeStateChanged())
@@ -103,26 +103,32 @@ class FlightListener(olympe.EventListener):
     @olympe.listen_event(PositionChanged())
     def onPositionChanged(self, event, scheduler):
         print("latitude = {latitude:.3f} longitude = {longitude:.3f} altitude = {altitude:.3f}".format(**event.args))
+        self.send_parrot_telemetry(event_type.POSITION, "fff",
+                                   (event.args['latitude'],
+                                    event.args['longitude'],
+                                    event.args['altitude']))
 
     @olympe.listen_event(SpeedChanged())
     def onSpeedChanged(self, event, scheduler):
         print("velocity = [{speedX:.3f},{speedY:.3f},{speedZ:.3f}] ".format(**event.args))
-        self._vel  = [event.args['speedX'], event.args['speedY'], event.args['speedZ']]
-        self.send_parrot_telemetry()
+        self.send_parrot_telemetry(event_type.VELOCITY, "fff",
+                                   (event.args['speedX'],
+                                    event.args['speedY'],
+                                    event.args['speedZ']))
 
     @olympe.listen_event(AltitudeChanged())
     def onAltitudeChanged(self, event, scheduler):
         print("altitude = {altitude:.3f}".format(**event.args))
-        self._alt  = event.args['altitude']
-        self.send_parrot_telemetry()
+        self.send_parrot_telemetry(event_type.ALTITUDE, "f",
+                                   (event.args['altitude'],))
 
     @olympe.listen_event(AttitudeChanged())
     def onAttitudeChanged(self, event, scheduler):
         print("roll = {roll:.3f}  pitch = {pitch:.3f}  yaw = {yaw:.3f}".format(**event.args))
-        self._roll  = event.args['roll']
-        self._pitch = event.args['pitch']
-        self._yaw   = event.args['yaw']
-        self.send_parrot_telemetry()
+        self.send_parrot_telemetry(event_type.ATTITUDE, "fff",
+                                   (event.args['roll'],
+                                    event.args['pitch'],
+                                    event.args['yaw']))
 
 class KeyboardCtrl(Listener):
     def __init__(self, ctrl_keys=None):
