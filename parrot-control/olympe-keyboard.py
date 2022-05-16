@@ -68,10 +68,10 @@ AZERTY_CTRL_KEYS.update(
 )
 
 class event_type(Enum):
-    ALTITUDE = 0,
-    ATTITUDE = 1,
-    VELOCITY = 2,
-    POSITION = 3,
+    ALTITUDE = 0
+    ATTITUDE = 1
+    VELOCITY = 2
+    POSITION = 3
 
 UDP_TELEMETRY_IP = '127.0.0.1'
 UDP_TELEMETRY_PORT = 5556

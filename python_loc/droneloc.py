@@ -35,15 +35,15 @@ import time
 import enum
 
 class kalman_type(enum.Enum):
-    EKF6   = 0,
-    EKF9   = 1,
-    UKF6   = 2,
+    EKF6   = 0
+    EKF9   = 1
+    UKF6   = 2
 
 
 class smoother_type(enum.Enum):
-    SAVGOL   = 0,
-    UNIFORM  = 1,
-    GAUSSIAN = 2,
+    SAVGOL   = 0
+    UNIFORM  = 1
+    GAUSSIAN = 2
 
 
 sigma_a = 0.125

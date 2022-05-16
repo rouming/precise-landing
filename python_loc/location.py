@@ -64,14 +64,14 @@ total_calc = 0
 PID_CONTROL_RATE_HZ = 2
 
 class dwm_source(enum.Enum):
-    BLE = 0,
-    SOCK = 1,
+    BLE = 0
+    SOCK = 1
 
 class parrot_event_type(enum.Enum):
-    ALTITUDE = 0,
-    ATTITUDE = 1,
-    VELOCITY = 2,
-    POSITION = 3,
+    ALTITUDE = 0
+    ATTITUDE = 1
+    VELOCITY = 2
+    POSITION = 3
 
 pre_smoother  = None
 post_smoother = None
