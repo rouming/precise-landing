@@ -508,55 +508,57 @@ def find_anchor_by_addr(location, addr):
 
     return None
 
-args = docopt(__doc__)
-if args['--data-source'] == 'sock':
-    DWM_DATA_SOURCE = dwm_source.SOCK
-elif args['--data-source'] == 'ble':
-    DWM_DATA_SOURCE = dwm_source.BLE
-else:
-    print("Error: incorrect --data-source param, should be 'ble' or 'sock'")
-    sys.exit(-1)
-
-avg_rate = avg_rate()
-navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y)
-plot_sock = create_plot_sock()
-
-navigator.start()
-droneloc = drone_localization(kalman_type.EKF6, post_smoother=post_smoother)
-
 def sigint_handler(sig, frame):
     print(' You pressed Ctrl+C! Disconnecting all devices, please wait ...')
     global should_stop, stop_efd
     should_stop = True
     stop_efd.set()
 
-signal.signal(signal.SIGINT, sigint_handler)
 
-while True:
-    loc, parrot_data, nano_data = get_dwm_location_or_parrot_data()
-    if should_stop:
-        break
-    if loc is None:
-        continue
+if __name__ == '__main__':
+    args = docopt(__doc__)
+    if args['--data-source'] == 'sock':
+        DWM_DATA_SOURCE = dwm_source.SOCK
+    elif args['--data-source'] == 'ble':
+        DWM_DATA_SOURCE = dwm_source.BLE
+    else:
+        print("Error: incorrect --data-source param, should be 'ble' or 'sock'")
+        sys.exit(-1)
 
-    parrot_alt = 0
+    avg_rate = avg_rate()
+    navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y)
+    plot_sock = create_plot_sock()
 
-    start = time.time()
+    navigator.start()
+    droneloc = drone_localization(kalman_type.EKF6, post_smoother=post_smoother)
 
-    # Invoke localization
-    x, y, z = droneloc.kf_process(loc, nano_data)
+    signal.signal(signal.SIGINT, sigint_handler)
 
-    # Calculate update rate
-    rate = avg_rate()
+    while True:
+        loc, parrot_data, nano_data = get_dwm_location_or_parrot_data()
+        if should_stop:
+            break
+        if loc is None:
+            continue
 
-    # PID control
-    navigator.navigate_drone(x, y)
+        parrot_alt = 0
 
-    # Send all math output to the plot
-    ts = time.time()
+        start = time.time()
 
-    send_plot_data(plot_sock, x, y, z, parrot_alt, ts, rate,
-                   len(loc['anchors']), navigator, loc)
+        # Invoke localization
+        x, y, z = droneloc.kf_process(loc, nano_data)
 
-destroy_dwm_fd()
-destroy_nano33_ble()
+        # Calculate update rate
+        rate = avg_rate()
+
+        # PID control
+        navigator.navigate_drone(x, y)
+
+        # Send all math output to the plot
+        ts = time.time()
+
+        send_plot_data(plot_sock, x, y, z, parrot_alt, ts, rate,
+                       len(loc['anchors']), navigator, loc)
+
+    destroy_dwm_fd()
+    destroy_nano33_ble()
