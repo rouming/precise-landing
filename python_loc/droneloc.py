@@ -40,9 +40,9 @@ class smoother_type(enum.Enum):
     UNIFORM  = 1
     GAUSSIAN = 2
 
-sigma_process = 0.125
+sigma_process = 0.225
 sigma_dist = 0.2
-sigma_vel = 0.1
+sigma_vel = 0.05
 sigma_alt = 0.02
 
 R_scale = 1
