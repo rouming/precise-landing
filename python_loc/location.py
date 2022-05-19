@@ -544,8 +544,8 @@ if __name__ == '__main__':
 
         start = time.time()
 
-        # Invoke localization
-        x, y, z = droneloc.kf_process(loc)
+        # Invoke distance localization
+        x, y, z = droneloc.kf_process_dist(loc)
 
         # Calculate update rate
         rate = avg_rate()

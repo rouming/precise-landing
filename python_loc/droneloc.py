@@ -3,10 +3,12 @@
 """Drone localization
 
 Usage:
-  droneloc.py --trajectory <file> [--post-smoother <smoother>] [--noise-std <sigma>] [--seed <seed>]
+  droneloc.py --trajectory <file> [--fuse-velocity] [--fuse-altitude] [--post-smoother <smoother>] [--noise-std <sigma>] [--seed <seed>]
 
 Options:
   -h --help                  Show this screen.
+  --fuse-velocity            Fuse velocity
+  --fuse-altitude            Fuse altitude
   --trajectory <file>        File of the drone trajectory.
   --post-smoother <smoother> Smoother after kalman processing, can be: savgol, uniform, gaussian
   --noise-std <sigma>        Add gaussian noise in mm to the anchor calculated distance,
@@ -38,11 +40,14 @@ class smoother_type(enum.Enum):
     UNIFORM  = 1
     GAUSSIAN = 2
 
-sigma_a = 0.125
-sigma_r = 0.2
-m_R_scale = 1
-m_Q_scale = 1
-m_z_damping_factor = 1
+sigma_process = 0.125
+sigma_dist = 0.2
+sigma_vel = 0.1
+sigma_alt = 0.02
+
+R_scale = 1
+Q_scale = 1
+z_damping_factor = 1
 
 dt = 0.2
 hist_window = 25
@@ -85,17 +90,18 @@ def F_6(x, dt):
 
 
 def Q_6(dt):
-    #Q = filterpy.common.Q_discrete_white_noise(dim=2, dt=dt, var=sigma_a**2, block_size=3)
+    #Q = filterpy.common.Q_discrete_white_noise(dim=2, dt=dt, var=sigma_process**2, block_size=3)
     q = [[dt**4 / 3, dt**3 / 2],
          [dt**3 / 2, dt**2]]
-    qz = np.array(q) * m_z_damping_factor
+    qz = np.array(q) * z_damping_factor
     Q = block_diag(q, q, qz)
-    Q *= sigma_a**2
-    Q *= m_Q_scale
+    Q *= sigma_process**2
+    Q *= Q_scale
 
     return Q
 
-def Hx_6(x, loc):
+
+def Hx_6_dist(x, loc):
     """ takes a state X and returns the measurement that would
     correspond to that state.
     """
@@ -114,13 +120,40 @@ def Hx_6(x, loc):
 
     return np.array(r_pred).T
 
-def get_measurements(loc):
+
+def Hx_6_alt(x):
+    """ takes a state X and returns the measurement that would
+    correspond to that state.
+    """
+
+    # Altitude, or Z coordinate
+    return np.array([x[4]]).T
+
+
+def Hx_6_vel(x):
+    """ takes a state X and returns the measurement that would
+    correspond to that state.
+    """
+
+    # X_6 = [Px, Vx, Py, Vy, Pz, Vz]
+    return np.array([x[1], x[3], x[5]]).T
+
+
+def get_measurements_dist(loc):
     ranges = []
     for anchor in loc['anchors']:
         dist = anchor["dist"]["dist"]
         ranges.append(dist)
 
     return np.array(ranges).T
+
+
+def get_measurements_alt(alt):
+    return np.array([alt['alt']]).T
+
+
+def get_measurements_vel(vel):
+    return np.array(vel['vel']).T
 
 
 class drone_localization():
@@ -132,7 +165,7 @@ class drone_localization():
 
     def __init__(self, dt=None, post_smoother=None):
         points = filterpy.kalman.MerweScaledSigmaPoints(n=6, alpha=.1, beta=2, kappa=0)
-        kf = filterpy.kalman.UnscentedKalmanFilter(dim_x=6, dim_z=4, fx=F_6, hx=Hx_6,
+        kf = filterpy.kalman.UnscentedKalmanFilter(dim_x=6, dim_z=4, fx=F_6, hx=Hx_6_dist,
                                                    dt=dt, points=points)
         kf.x = np.array([1, 0, 1, 0, 1, 0])
 
@@ -184,22 +217,75 @@ class drone_localization():
         return pos_f[-1]
 
 
-    def kf_process(self, loc):
+    def kf_process_dist(self, loc):
         old_x = self.kf.x
         old_P = self.kf.P
-        R = np.eye(len(loc["anchors"])) * (sigma_r**2 * m_R_scale)
+
+        R = np.eye(len(loc["anchors"])) * (sigma_dist**2 * R_scale)
         dt = self.get_dt(loc)
 
         self.kf.Q = Q_6(dt)
-        self.kf.dim_z = len(loc['anchors'])
+        self.kf._dim_z = len(loc['anchors'])
         self.kf.predict(dt=dt)
 
-        z = get_measurements(loc)
+        z = get_measurements_dist(loc)
         self.kf.R = R
-        self.kf.update(z, loc=loc)
+        self.kf.update(z, hx=Hx_6_dist, loc=loc)
 
         if np.any(np.abs(self.kf.y) > 2):
-            print("innovation is too large: ", self.kf.y)
+            print("innovation DIST is too large: ", self.kf.y)
+            self.kf.x = old_x
+            self.kf.P = old_P
+
+        # Smooth calculated position, i.e. Px=[0], Py=[2], Pz=[4]
+        return self.post_smooth(self.kf.x[0:6:2])
+
+
+    def kf_process_alt(self, alt):
+        old_x = self.kf.x
+        old_P = self.kf.P
+
+        R = np.eye(1) * (sigma_alt**2)
+        dt = self.get_dt(alt)
+
+        self.kf.Q = Q_6(dt)
+        self.kf._dim_z = 1
+        self.kf.predict(dt=dt)
+
+        z = get_measurements_alt(alt)
+        self.kf.R = R
+        self.kf.update(z, hx=Hx_6_alt)
+
+        if np.any(np.abs(self.kf.y) > 2):
+            print("innovation ALT is too large: ", self.kf.y)
+            print("Z alt [%.3f]" % (z[0]))
+            print("X alt [%.3f]" % (self.kf.x[4]))
+            self.kf.x = old_x
+            self.kf.P = old_P
+
+        # Smooth calculated position, i.e. Px=[0], Py=[2], Pz=[4]
+        return self.post_smooth(self.kf.x[0:6:2])
+
+
+    def kf_process_vel(self, vel):
+        old_x = self.kf.x
+        old_P = self.kf.P
+
+        R = np.eye(3) * (sigma_vel**2)
+        dt = self.get_dt(vel)
+
+        self.kf.Q = Q_6(dt)
+        self.kf._dim_z = 3
+        self.kf.predict(dt=dt)
+
+        z = get_measurements_vel(vel)
+        self.kf.R = R
+        self.kf.update(z, hx=Hx_6_vel)
+
+        if np.any(np.abs(self.kf.y) > 2):
+            print("innovation VEL is too large: ", self.kf.y)
+            print("Z vel [%.3f,%.3f,%.3f]" % (z[0], z[1], z[2]))
+            print("X vel [%.3f,%.3f,%.3f]" % (self.kf.x[1], self.kf.x[3], self.kf.x[5]))
             self.kf.x = old_x
             self.kf.P = old_P
 
@@ -233,7 +319,6 @@ if __name__ == '__main__':
         seed = int(args['--seed'])
 
     np.set_printoptions(precision=3)
-
     np.random.seed(seed)
 
     noise_std = 0.0
@@ -247,6 +332,7 @@ if __name__ == '__main__':
     plt.scatter(anchors_coords[:, 0], anchors_coords[:, 1])
 
     n = 0
+    prev_true_coords = None
     while True:
         line = data_file.readline()
         if not line:
@@ -266,6 +352,12 @@ if __name__ == '__main__':
             },
         }
 
+        vel = None
+        if prev_true_coords is not None:
+            vec = np.array(true_coords) - np.array(prev_true_coords)
+            vel = vec / dt
+        prev_true_coords = true_coords
+
         for anchor in anchors:
             acoords = np.array(anchor['pos']['coords'])
 
@@ -281,7 +373,26 @@ if __name__ == '__main__':
 
         loc['anchors'] = anchors
 
-        coords = droneloc.kf_process(loc)
+        if not args['--fuse-velocity'] and not args['--fuse-altitude']:
+            coords = droneloc.kf_process_dist(loc)
+        elif args['--fuse-velocity'] and args['--fuse-altitude']:
+            if n % 3 == 0:
+                coords = droneloc.kf_process_dist(loc)
+            elif n % 2 == 0 and vel is not None:
+                coords = droneloc.kf_process_vel({'vel': vel})
+            else:
+                coords = droneloc.kf_process_alt({'alt': true_coords[2]})
+        elif args['--fuse-velocity']:
+            if n % 2 == 0:
+                coords = droneloc.kf_process_dist(loc)
+            else:
+                coords = droneloc.kf_process_vel({'vel': vel})
+        else:
+            if n % 2 == 0:
+                coords = droneloc.kf_process_dist(loc)
+            else:
+                coords = droneloc.kf_process_alt({'alt': true_coords[2]})
+
         if coords is None:
             continue
 
