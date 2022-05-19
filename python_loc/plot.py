@@ -28,9 +28,9 @@ from scipy.signal import savgol_filter
 
 import config as cfg
 
-X_LIM = 3
-Y_LIM = 3
-Z_LIM = 3
+X_LIM = 2
+Y_LIM = 2
+Z_LIM = 2
 
 parrot_data = None
 args = None
@@ -285,8 +285,8 @@ def draw_3dscene(ax, X, Y, Z, true_X, true_Y, true_Z, parrot_alt, ts, anch_cnt):
 
     # TODO: draw anchors
     # ax.add_collection3d(Poly3DCollection(rects, color='g', alpha=0.5))
-    ax.set_xlim3d(-X_LIM, X_LIM)
-    ax.set_ylim3d(-Y_LIM, Y_LIM)
+    ax.set_xlim3d(0, X_LIM)
+    ax.set_ylim3d(0, Y_LIM)
     ax.set_zlim3d(0, Z_LIM)
 
     # WTF?
