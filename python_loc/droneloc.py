@@ -321,14 +321,10 @@ class drone_localization():
         elif self.kf_type == kalman_type.UKF6:
             self.kf.update(z, loc=loc)
 
-        if self.kf.x[4] < 0:
-            self.kf.x[4] = np.abs(self.kf.x[4])
-
         if np.any(np.abs(self.kf.y) > 2):
             print("innovation is too large: ", self.kf.y)
             self.kf.x = old_x
             self.kf.P = old_P
-            return None
 
         Xk = self.kf.x
 
@@ -338,7 +334,7 @@ class drone_localization():
 
             self.x_hist.append(Xk)
             if len(self.x_hist) < hist_window:
-                return None
+                return [0.0, 0.0, 0.0]
 
             if self.post_smoother == smoother_type.SAVGOL:
                 Xk_f = savgol_filter(self.x_hist, hist_window, 5,
