@@ -430,7 +430,7 @@ def receive_parrot_data_from_sock(sock):
     return parrot_data
 
 def is_dwm_location_reliable(loc):
-    return len(loc['anchors']) >= 3
+    return len(loc['anchors']) >= 2
 
 def print_location(loc):
     coords = loc['pos']['coords']
