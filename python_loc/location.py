@@ -403,7 +403,7 @@ def receive_dwm_location(dwm_fd):
     if tag:
         loc = tag.get_location()
     else:
-        print("Error: can't find tag by addr 0x%x" % tag_addr)
+        print("Error: can't find tag by addr 0x%x" % cfg.TAG_ADDR)
 
     return loc
 
@@ -522,12 +522,6 @@ def get_dwm_location_or_parrot_data():
                 received = True
         if nano33_fd in rd:
             acc, attitude = receive_nano33_data()
-
-            print("acc = {x=%.3f y=%.3f z=%.3f}, attitude = {yaw=%.3f pitch=%.3f roll=%.3f} ts=%d" % \
-                  (acc[0], acc[1], acc[2],
-                   attitude[0], attitude[1], attitude[2],
-                   acc[3]))
-
             nano_data = {}
             nano_data["acc"] = acc # ax, ay, az, ts
             nano_data["attitude"] = attitude
