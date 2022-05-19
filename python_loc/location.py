@@ -38,10 +38,6 @@ from scipy.optimize import minimize
 from simple_pid import PID
 import config as cfg
 
-from scipy.signal import savgol_filter
-from scipy.ndimage import gaussian_filter1d
-from scipy.ndimage import uniform_filter1d
-
 args        = None
 dwm_fd      = None
 nano33_fd   = None
@@ -54,9 +50,6 @@ nano33_manager = None
 
 should_stop = False
 stop_efd    = eventfd.EventFD()
-
-anch_len_log = {}
-hist_len_sec = 5
 
 total_pos = 0
 total_calc = 0
@@ -73,30 +66,9 @@ class parrot_event_type(enum.Enum):
     VELOCITY = 2
     POSITION = 3
 
-pre_smoother  = None
 post_smoother = None
 
 DWM_DATA_SOURCE = dwm_source.BLE
-
-class len_log:
-    def __init__(self):
-        self.data = []
-        self.T = []
-
-    def add_to_filter(self, l, ts):
-        self.data.append(l)
-        self.T.append(ts)
-
-        if pre_smoother == smoother_type.UNIFORM and len(self.data) > moving_window:
-            self.data = list(uniform_filter1d(self.data, size=moving_window, mode="reflect"))
-        if pre_smoother == smoother_type.GAUSSIAN:
-            self.data = list(gaussian_filter1d(self.data, 6))
-
-        while (len(self.T) > 0) and (ts - self.T[0] > hist_len_sec):
-            self.data.pop(0)
-            self.T.pop(0)
-
-        return self.data[-1]
 
 #
 # Welford's online algorithm
@@ -552,17 +524,6 @@ plot_sock = create_plot_sock()
 navigator.start()
 droneloc = drone_localization(kalman_type.EKF6, post_smoother=post_smoother)
 
-def filter_dist(loc):
-    for anch in loc["anchors"]:
-        addr = anch["addr"]
-        dist = anch["dist"]["dist"]
-
-        if addr not in anch_len_log:
-            anch_len_log[addr] = len_log()
-
-        dist = anch_len_log[addr].add_to_filter(dist, loc['ts'])
-        anch["dist"]["dist"] = dist
-
 def sigint_handler(sig, frame):
     print(' You pressed Ctrl+C! Disconnecting all devices, please wait ...')
     global should_stop, stop_efd
@@ -579,8 +540,6 @@ while True:
         continue
 
     parrot_alt = 0
-
-    filter_dist(loc)
 
     start = time.time()
 
