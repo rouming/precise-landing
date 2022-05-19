@@ -225,12 +225,10 @@ class drone_localization():
         dt = self.get_dt(loc)
 
         self.kf.Q = Q_6(dt)
-        self.kf._dim_z = len(loc['anchors'])
         self.kf.predict(dt=dt)
 
         z = get_measurements_dist(loc)
-        self.kf.R = R
-        self.kf.update(z, hx=Hx_6_dist, loc=loc)
+        self.kf.update(z, R=R, hx=Hx_6_dist, loc=loc)
 
         if np.any(np.abs(self.kf.y) > 2):
             print("innovation DIST is too large: ", self.kf.y)
@@ -249,12 +247,10 @@ class drone_localization():
         dt = self.get_dt(alt)
 
         self.kf.Q = Q_6(dt)
-        self.kf._dim_z = 1
         self.kf.predict(dt=dt)
 
         z = get_measurements_alt(alt)
-        self.kf.R = R
-        self.kf.update(z, hx=Hx_6_alt)
+        self.kf.update(z, R=R, hx=Hx_6_alt)
 
         if np.any(np.abs(self.kf.y) > 2):
             print("innovation ALT is too large: ", self.kf.y)
@@ -275,12 +271,10 @@ class drone_localization():
         dt = self.get_dt(vel)
 
         self.kf.Q = Q_6(dt)
-        self.kf._dim_z = 3
         self.kf.predict(dt=dt)
 
         z = get_measurements_vel(vel)
-        self.kf.R = R
-        self.kf.update(z, hx=Hx_6_vel)
+        self.kf.update(z, R=R, hx=Hx_6_vel)
 
         if np.any(np.abs(self.kf.y) > 2):
             print("innovation VEL is too large: ", self.kf.y)
