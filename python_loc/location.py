@@ -96,13 +96,7 @@ class len_log:
             self.data.pop(0)
             self.T.pop(0)
 
-    def get_log(self):
-        return self.data
-
-    def get_last_filtered(self):
-        res = self.data[-1]
-
-        return res
+        return self.data[-1]
 
 #
 # Welford's online algorithm
@@ -631,8 +625,8 @@ def filter_dist(loc):
         if addr not in anch_len_log:
             anch_len_log[addr] = len_log()
 
-        anch_len_log[addr].add_to_filter(dist, ts)
-        anch["dist"]["dist"] = anch_len_log[addr].get_last_filtered()
+        dist = anch_len_log[addr].add_to_filter(dist, ts)
+        anch["dist"]["dist"] = dist
 
 def sigint_handler(sig, frame):
     print(' You pressed Ctrl+C! Disconnecting all devices, please wait ...')
