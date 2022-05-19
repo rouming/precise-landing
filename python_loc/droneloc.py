@@ -158,6 +158,32 @@ class drone_localization():
         return dt
 
 
+    def post_smooth(self, pos):
+        if self.post_smoother is None:
+            return pos
+
+        if len(self.x_hist) > hist_window:
+            self.x_hist.pop(0)
+
+        self.x_hist.append(pos)
+        if len(self.x_hist) < hist_window:
+            return [0.0, 0.0, 0.0]
+
+        if self.post_smoother == smoother_type.SAVGOL:
+            pos_f = savgol_filter(self.x_hist, hist_window, 5,
+                                  axis=0, mode="nearest")
+        elif self.post_smoother == smoother_type.UNIFORM:
+            pos_f = uniform_filter1d(self.x_hist, size=hist_window,
+                                     axis=0, mode="reflect")
+        elif self.post_smoother == smoother_type.GAUSSIAN:
+            pos_f = gaussian_filter1d(self.x_hist, sigma=6,
+                                      axis=0, mode="reflect")
+        else:
+            assert(0)
+
+        return pos_f[-1]
+
+
     def kf_process(self, loc):
         old_x = self.kf.x
         old_P = self.kf.P
@@ -177,28 +203,8 @@ class drone_localization():
             self.kf.x = old_x
             self.kf.P = old_P
 
-        Xk = self.kf.x
-
-        if self.post_smoother is not None:
-            if len(self.x_hist) > hist_window:
-                self.x_hist.pop(0)
-
-            self.x_hist.append(Xk)
-            if len(self.x_hist) < hist_window:
-                return [0.0, 0.0, 0.0]
-
-            if self.post_smoother == smoother_type.SAVGOL:
-                Xk_f = savgol_filter(self.x_hist, hist_window, 5,
-                                     axis=0, mode="nearest")
-            elif self.post_smoother == smoother_type.UNIFORM:
-                Xk_f = uniform_filter1d(self.x_hist, size=hist_window,
-                                        axis=0, mode="reflect")
-            elif self.post_smoother == smoother_type.GAUSSIAN:
-                Xk_f = gaussian_filter1d(self.x_hist, sigma=6,
-                                         axis=0, mode="reflect")
-            return [Xk_f[-1, 0], Xk_f[-1, 2], Xk_f[-1, 4]]
-
-        return [Xk[0], Xk[2], Xk[4]]
+        # Smooth calculated position, i.e. Px=[0], Py=[2], Pz=[4]
+        return self.post_smooth(self.kf.x[0:6:2])
 
 
 def get_anchors_coords(anchors):
