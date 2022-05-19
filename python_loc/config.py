@@ -2,7 +2,6 @@
 
 import numpy as np
 import enum
-from droneloc import kalman_type
 
 # Distances from DWM1001-server
 MCAST_GRP = '224.1.1.1'

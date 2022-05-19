@@ -26,7 +26,6 @@ import signal
 
 import filterpy.kalman
 from droneloc import drone_localization
-from droneloc import kalman_type
 from droneloc import smoother_type
 
 import dwm1001_ble
@@ -530,7 +529,7 @@ if __name__ == '__main__':
     plot_sock = create_plot_sock()
 
     navigator.start()
-    droneloc = drone_localization(kalman_type.EKF6, post_smoother=post_smoother)
+    droneloc = drone_localization(post_smoother=post_smoother)
 
     signal.signal(signal.SIGINT, sigint_handler)
 
@@ -546,7 +545,7 @@ if __name__ == '__main__':
         start = time.time()
 
         # Invoke localization
-        x, y, z = droneloc.kf_process(loc, nano_data)
+        x, y, z = droneloc.kf_process(loc)
 
         # Calculate update rate
         rate = avg_rate()
