@@ -536,63 +536,6 @@ def find_anchor_by_addr(location, addr):
 
     return None
 
-def func1(X, loc):
-    sum = 0
-    for anch in loc["anchors"]:
-        coords = anch["pos"]["coords"]
-        anchor_pos = np.array(coords, dtype=np.float64)
-        dist = anch["dist"]["dist"]
-        sum += (np.linalg.norm(X - anchor_pos) - dist) ** 2
-    return sum
-
-# grad is probably wrong, check it later
-# btw it works fine without it
-# this shit probably good if we have some anchors with non zero z coordinate
-def grad_func1(X, la, lb, lc, ld):
-    na = np.linalg.norm(X - A)
-    nb = np.linalg.norm(X - B)
-    nc = np.linalg.norm(X - C)
-    nd = np.linalg.norm(X - D)
-
-    ret = 2 * (1 - la / na) * (X - A) + 2 * (1 - lb / nb) * (X - B) + \
-          2 * (1 - lc / nc) * (X - C) + 2 * (1 - ld / nd) * (X - D)
-
-    return ret
-
-assigned = False
-def calc_pos(X0, loc):
-
-    # all are the experiments
-    #res = least_squares(func, X0, loss='soft_l1', jac=jac, bounds=([-3, -3, 0.0], [3, 3, 3]), args=(la, lb, lc, ld), verbose=1)
-
-    #to make smooth path, but in general this is shit i think
-    # lowb = X0-0.2
-    # if lowb[2] < 0:
-    #     lowb[2] = 0
-    # upb = X0+0.2
-    lowb = [-np.inf, -np.inf, 0]
-    upb = [np.inf, np.inf, np.inf]
-
-    #res = least_squares(func1, X0, loss='cauchy', f_scale=0.001, bounds=(lowb, upb),
-    res = least_squares(func1, X0, bounds=(lowb, upb),
-                        #args=(la, lb, lc, ld), verbose=1)
-                        args=[loc], verbose=0)
-
-    ##also decent and fast
-    # res = minimize(func1, X0, method="L-BFGS-B", bounds=[(-math.inf, math.inf), (-math.inf, math.inf), (0, math.inf)],
-    #                #options={'ftol': 1e-4, 'disp': True}, args=(la, lb, lc, ld))
-    #                options={'ftol': 1e-4,'eps' : 1e-4, 'disp': False}, args=loc)
-
-    # res = minimize(func1, X0, method="SLSQP", bounds=[(-math.inf, math.inf), (-math.inf, math.inf), (0, math.inf)],
-    #           options={ 'ftol': 1e-5, 'disp': True}, args=loc)
-    #           #options={'ftol': 1e-5,'eps' : 1e-8, 'disp': False}, args=loc)
-
-    # experiments
-    #res = minimize(func1, X0, method='BFGS', options={'xatol': 1e-8, 'disp': True}, args=(la, lb, lc, ld))
-    #res = optimize.shgo(func1, bounds=[(-10, 10), (-10, 10), (0, 10)], args=(la, lb, lc, ld),n=200, iters=5, sampling_method='sobol')
-    #res = minimize(func1, X0, method='BFGS', options={'disp': True}, args=(la, lb, lc, ld))
-    return res.x
-
 args = docopt(__doc__)
 if args['--data-source'] == 'sock':
     DWM_DATA_SOURCE = dwm_source.SOCK
@@ -607,9 +550,7 @@ navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y)
 plot_sock = create_plot_sock()
 
 navigator.start()
-
-if cfg.KALMAN_TYPE is not None:
-    droneloc = drone_localization(cfg.KALMAN_TYPE, post_smoother=post_smoother)
+droneloc = drone_localization(kalman_type.EKF6, post_smoother=post_smoother)
 
 def filter_dist(loc):
     for anch in loc["anchors"]:
@@ -619,7 +560,7 @@ def filter_dist(loc):
         if addr not in anch_len_log:
             anch_len_log[addr] = len_log()
 
-        dist = anch_len_log[addr].add_to_filter(dist, ts)
+        dist = anch_len_log[addr].add_to_filter(dist, loc['ts'])
         anch["dist"]["dist"] = dist
 
 def sigint_handler(sig, frame):
@@ -631,78 +572,31 @@ def sigint_handler(sig, frame):
 signal.signal(signal.SIGINT, sigint_handler)
 
 while True:
-    print(">> get location from anchors")
-
     loc, parrot_data, nano_data = get_dwm_location_or_parrot_data()
     if should_stop:
         break
     if loc is None:
         continue
 
-    print(">> got calculated position from the engine")
-
-    coords = loc['pos']['coords']
-    x = coords[0]
-    y = coords[1]
-    z = coords[2]
-    qf = loc['pos']['qf']
-    ts = loc["ts"]
-
     parrot_alt = 0
 
-    print(">> get distances")
     filter_dist(loc)
-
-    if not assigned:
-        X0 = np.abs(np.array([x, y, z]))
-        assigned = True
 
     start = time.time()
 
-    #
-    # Choose what calculation method to use
-    #
-    if cfg.KALMAN_TYPE is not None:
-        X_calc = droneloc.kf_process(loc, nano_data)
-        if X_calc is None:
-            continue
-    else:
-        X_calc = calc_pos(X0, loc)
-        X0 = X_calc
-
-    print("calc time {}".format(time.time() - start))
-
-    if parrot_data is not None and (ts - parrot_data["ts"] < 2):
-        parrot_alt = parrot_data["alt"]
-        X_calc[2] = parrot_alt
-
-    xf = X_calc[0]
-    yf = X_calc[1]
-    zf = X_calc[2]
-
-    f_pos = func1(np.array([x, y, z]), loc)
-    c_pos = func1([xf, yf, zf], loc)
-    print("POS: %.2f %.2f %.2f" % (x, y , z), " C : %.2f %.2f %.2f" % (xf, yf, zf),
-          " func(pos): %.4f" % f_pos, " func1(X_calc): %.4f" % c_pos)
-
-    f_pos_norm = np.linalg.norm(f_pos)
-    c_pos_norm = np.linalg.norm(c_pos)
-    total_pos += f_pos_norm
-    total_calc += c_pos_norm
-
-    print("norm f(pos): ", f_pos_norm, " norm f(X_calc): ", c_pos_norm)
-    print("total pos norm: ", total_pos, " total calc norm: ", total_calc)
+    # Invoke localization
+    x, y, z = droneloc.kf_process(loc, nano_data)
 
     # Calculate update rate
     rate = avg_rate()
 
     # PID control
-    navigator.navigate_drone(xf, yf)
+    navigator.navigate_drone(x, y)
 
     # Send all math output to the plot
     ts = time.time()
 
-    send_plot_data(plot_sock, xf, yf, zf, parrot_alt, ts, rate,
+    send_plot_data(plot_sock, x, y, z, parrot_alt, ts, rate,
                    len(loc['anchors']), navigator, loc)
 
 destroy_dwm_fd()

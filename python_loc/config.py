@@ -4,10 +4,6 @@ import numpy as np
 import enum
 from droneloc import kalman_type
 
-# Do we use kalman
-KALMAN_TYPE = kalman_type.EKF6
-# KALMAN_TYPE = None
-
 # Distances from DWM1001-server
 MCAST_GRP = '224.1.1.1'
 MCAST_PORT = 5555
