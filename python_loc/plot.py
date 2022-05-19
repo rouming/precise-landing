@@ -3,11 +3,12 @@
 """Plot data from location.py script
 
 Usage:
-  plot.py [(--plot3d [--plot-true-pos])] [--filter]
+  plot.py [(--plot3d [--plot-true-pos] [--only])] [--filter]
 
 Options:
   -h --help              Show this screen
   --plot3d               Plot 3D scene
+  --only                 Plot 3D scene only
   --plot-true-pos        Plot true poistion with green dashed line on a 3D scene
   --filter               Filter data
 """
@@ -250,7 +251,7 @@ class dynamic_plot():
 
 
 first_ts = 0
-def draw_scene(ax, X, Y, Z, true_X, true_Y, true_Z, parrot_alt, ts, anch_cnt):
+def draw_3dscene(ax, X, Y, Z, true_X, true_Y, true_Z, parrot_alt, ts, anch_cnt):
     global first_ts
     global parrot_data
 
@@ -258,7 +259,8 @@ def draw_scene(ax, X, Y, Z, true_X, true_Y, true_Z, parrot_alt, ts, anch_cnt):
         first_ts = ts
 
     # Clear previous data on the 3d plot
-    ax3d.cla()
+    ax.cla()
+    ax.set(xlabel='x', ylabel='y', zlabel='z', title='Localization')
 
     if len(X) > 0:
         # FIXME: This needs to be not global 'plt' dependendent,
@@ -269,7 +271,7 @@ def draw_scene(ax, X, Y, Z, true_X, true_Y, true_Z, parrot_alt, ts, anch_cnt):
         ax.scatter(X, Y, Z, color='r', s=0.8)
         if args['--plot-true-pos']:
             ax.scatter(true_X, true_Y, true_Z, color='g', s=0.8)
-        ax.scatter(X[-1], Y[-1], Z[-1], color='b', s=5)
+        ax.scatter(X[-1], Y[-1], Z[-1], color='b', s=12)
 
         ax.text2D(0.0, 1, "     x         y          z", transform=ax.transAxes)
         ax.text2D(0.0, 0.96, "{:7.2f} {:7.2f} {:7.2f}     {:7.3f}s    #{} anch".format(
@@ -323,14 +325,15 @@ if __name__ == '__main__':
     # Plot interactive
     plt.ion()
 
-    # Create PID plots
-    pid_x_plot = dynamic_plot('PID X', 'Time (s)', 'Drone X distance (m)',
-                              'PID', 'target', cfg.LANDING_X)
-    pid_y_plot = dynamic_plot('PID Y', 'Time (s)', 'Drone Y distance (m)',
-                              'PID', 'target', cfg.LANDING_Y)
+    if not args['--only']:
+        # Create PID plots
+        pid_x_plot = dynamic_plot('PID X', 'Time (s)', 'Drone X distance (m)',
+                                  'PID', 'target', cfg.LANDING_X)
+        pid_y_plot = dynamic_plot('PID Y', 'Time (s)', 'Drone Y distance (m)',
+                                  'PID', 'target', cfg.LANDING_Y)
 
-    # create len plots
-    len_plot = dynamic_dist_plot("Anchors dist", "Time (s)", "Drone distance (m)")
+        # Create len plots
+        len_plot = dynamic_dist_plot("Anchors dist", "Time (s)", "Drone distance (m)")
 
     # Create 3D plot
     if args['--plot3d']:
@@ -390,30 +393,31 @@ if __name__ == '__main__':
             Y_f1 = Y_filtered1[-1]
             Y_f2 = Y_filtered2[-1]
 
-        # PID texts
-        pid_x_text = "Kp=%.2f Ki=%.2f Kd=%.2f   Update %.1fHz  dropped %d\n" \
-                     "   %.2f    %.2f    %.2f\n" \
-                     "x %5.2f  roll %d" % \
-                     (xKp, xKi, xKd, rate, dropped, xp, xi, xd, x, roll)
+        if not args['--only']:
+            # PID texts
+            pid_x_text = "Kp=%.2f Ki=%.2f Kd=%.2f   Update %.1fHz  dropped %d\n" \
+                         "   %.2f    %.2f    %.2f\n" \
+                         "x %5.2f  roll %d" % \
+                         (xKp, xKi, xKd, rate, dropped, xp, xi, xd, x, roll)
 
-        pid_y_text = "Kp=%.2f Ki=%.2f Kd=%.2f   Update %.1fHz  dropped %d\n" \
-                     "   %.2f    %.2f    %.2f\n" \
-                     "y %5.2f  pitch %d" % \
-                     (yKp, yKi, yKd, rate, dropped, yp, yi, yd, y, pitch)
+            pid_y_text = "Kp=%.2f Ki=%.2f Kd=%.2f   Update %.1fHz  dropped %d\n" \
+                         "   %.2f    %.2f    %.2f\n" \
+                         "y %5.2f  pitch %d" % \
+                         (yKp, yKi, yKd, rate, dropped, yp, yi, yd, y, pitch)
 
-        # Timestamp from 0
-        if start_ts == 0.0:
-            start_ts = ts
-        ts -= start_ts
+            # Timestamp from 0
+            if start_ts == 0.0:
+                start_ts = ts
+                ts -= start_ts
 
-        # Update PID plots
-        pid_x_plot.update(ts, x, X_f1, X_f2, pid_x_text)
-        pid_y_plot.update(ts, y, Y_f1, Y_f2, pid_y_text)
+            # Update PID plots
+            pid_x_plot.update(ts, x, X_f1, X_f2, pid_x_text)
+            pid_y_plot.update(ts, y, Y_f1, Y_f2, pid_y_text)
 
-        len_plot.update(ts, [addr1, addr2, addr3, addr4],
-                        [dist1, dist2, dist3, dist4])
+            len_plot.update(ts, [addr1, addr2, addr3, addr4],
+                            [dist1, dist2, dist3, dist4])
 
         # Draw 3d scene
         if args['--plot3d']:
-            draw_scene(ax3d, X, Y, Z, true_X, true_Y, true_Z,
-                       parrot_alt, ts, nr_anchors)
+            draw_3dscene(ax3d, X, Y, Z, true_X, true_Y, true_Z,
+                         parrot_alt, ts, nr_anchors)
