@@ -533,13 +533,29 @@ if __name__ == '__main__':
 
     signal.signal(signal.SIGINT, sigint_handler)
 
+    # If DWM modules stop returning distances don't fuse altitude or velocity,
+    # otherwise innovation (residual) starts growing
+    without_dwm_data = 1<<32
+
     while True:
         loc, parrot_data, nano_data = get_dwm_location_or_parrot_data()
         if should_stop:
             break
+
+        if parrot_data is not None and without_dwm_data < 4:
+            without_dwm_data += 1
+
+            if 'alt' in parrot_data:
+                # Fuse altitude
+                droneloc.kf_process_alt(parrot_data)
+            elif 'vel' in parrot_data:
+                # Fuse velocity
+                droneloc.kf_process_vel(parrot_data)
+
         if loc is None:
             continue
 
+        without_dwm_data = 0
         parrot_alt = 0
 
         start = time.time()
