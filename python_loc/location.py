@@ -104,6 +104,22 @@ class avg_rate:
 
         return rate
 
+def normalize_angle(x):
+    x = x % (2 * math.pi)    # force in range [0, 2 pi)
+    if x > math.pi:          # move to [-pi, pi)
+        x -= 2 * math.pi
+    return x
+
+def ned_to_enu_coords(vec):
+    return (vec[1], vec[0], -vec[2])
+
+# Rotates anti-clockwise in XY plane
+def rotate_vec_on_xy_angle(vec, xy_angle):
+    rot = np.array([[np.cos(xy_angle), -np.sin(xy_angle),  0],
+                    [np.sin(xy_angle),  np.cos(xy_angle),  0],
+                    [               0,                 0,  1]])
+    return np.dot(rot, np.array(vec))
+
 class drone_navigator(threading.Thread):
     # PID tuning files, format is: float float float [float, float]
     pid_tuning_file = "./pid.tuning"
@@ -113,15 +129,21 @@ class drone_navigator(threading.Thread):
     default_pid_limits = (-100, 100)
 
     # Thread data
-    data = None
+    in_pos = None
+    in_yaw = None
     lock =  threading.Lock()
 
-    # XXX
+    # Target coords and angle
+    target_x = 0
+    target_y = 0
+    target_yaw = 0
+
+    # PID output
     pitch = 0
     roll = 0
-    rate = 0.0
+    yaw = 0
 
-    def __init__(self, target_x, target_y):
+    def __init__(self, target_x, target_y, target_yaw):
         # Create commands sock
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
@@ -129,21 +151,28 @@ class drone_navigator(threading.Thread):
 
         # Set desired landing coordinates
         x_pid = PID(Kp=components[0], Ki=components[1], Kd=components[2],
-                    setpoint=target_x,
                     proportional_on_measurement=False)
         y_pid = PID(Kp=components[0], Ki=components[1], Kd=components[2],
-                    setpoint=target_y,
                     proportional_on_measurement=False)
+        yaw_pid = PID(Kp=200, Ki=0, Kd=100,
+                      setpoint=target_yaw,
+                      proportional_on_measurement=False,
+                      error_map=normalize_angle)
 
         # Control coeff limits
         x_pid.output_limits = self.default_pid_limits
         y_pid.output_limits = self.default_pid_limits
+        yaw_pid.output_limits = self.default_pid_limits
 
         self.start_time = time.time()
 
         self.sock = sock
-        self.x_pid = x_pid
-        self.y_pid = y_pid
+        self.x_pid   = x_pid
+        self.y_pid   = y_pid
+        self.yaw_pid = yaw_pid
+        self.target_x = target_x
+        self.target_y = target_y
+        self.target_yaw = target_yaw
 
         super().__init__()
 
@@ -178,33 +207,55 @@ class drone_navigator(threading.Thread):
             time.sleep(1/PID_CONTROL_RATE_HZ)
 
             self.lock.acquire()
-            data = self.data
+            in_pos = self.in_pos
+            in_yaw = self.in_yaw
             self.lock.release()
 
-            if data is None:
+            if in_yaw is None:
                 continue
 
-            (x, y) = data
+            control_yaw = self.yaw_pid(in_yaw)
+            control_x = 0
+            control_y = 0
 
-            self._pid_tuning(self.x_pid, self.pid_tuning_file)
-            self._pid_tuning(self.y_pid, self.pid_tuning_file)
+            if in_pos is not None:
+                self._pid_tuning(self.x_pid, self.pid_tuning_file)
+                self._pid_tuning(self.y_pid, self.pid_tuning_file)
 
-            control_x = self.x_pid(x)
-            control_y = self.y_pid(y)
+                # Drone yaw angle relative to the landing area
+                yaw_angle = in_yaw - self.target_yaw
+
+                # Target position in the drone frame
+                target_pos = np.array([self.target_x, self.target_y, 0]) - \
+                             np.array(in_pos)
+                target_pos = rotate_vec_on_xy_angle(target_pos, yaw_angle)
+
+                # Translate drone position into target frame
+                drone_pos = -target_pos
+
+                control_x = self.x_pid(drone_pos[0])
+                control_y = self.y_pid(drone_pos[1])
 
             # Parrot accepts in signed percentage, i.e. [-100, 100] range
             roll = int(control_x)
             pitch = int(control_y)
-            self._send_command(roll, pitch, 0, 0)
+            yaw = int(control_yaw)
+            self._send_command(roll, pitch, yaw, 0)
 
             self.roll = roll
             self.pitch = pitch
-            self.rate = rate
+            self.yaw = yaw
 
-    def navigate_drone(self, x, y):
+    def navigate_drone(self, x, y, z):
         self.lock.acquire()
-        self.data = (x, y)
+        self.in_pos = (x, y, z)
         self.lock.release()
+
+    def orient_drone(self, yaw):
+        self.lock.acquire()
+        self.in_yaw = yaw
+        self.lock.release()
+
 
 def create_dwm_sock():
     # Create sock and bind
@@ -403,10 +454,17 @@ def receive_parrot_data_from_sock(sock):
         fmt += "fff"
         sz = struct.calcsize(fmt)
         buf = sock.recv(sz)
-        _, _, _, x, y, z  = struct.unpack(fmt, buf)
-        if x == 0.0 and y == 0.0 and z == 0.0:
+        _, _, _, *vel  = struct.unpack(fmt, buf)
+        vel = np.array(vel)
+        if np.all(vel == 0.0):
             return None
-        parrot_data = {'vel': [x, y, z]}
+        # Drone coordinates are in NED, but landing area is in ENU
+        # rotated on LANDING_ANGLE
+        vel = ned_to_enu_coords(vel)
+        # Convert velocity in ENU to landing area coordinates:
+        # rotates clockwise on LANDING_ANGLE
+        vel = rotate_vec_on_xy_angle(vel, -cfg.LANDING_ANGLE)
+        parrot_data = {'vel': vel}
     elif event_type == parrot_event_type.POSITION:
         fmt += "fff"
         sz = struct.calcsize(fmt)
@@ -419,8 +477,7 @@ def receive_parrot_data_from_sock(sock):
         sz = struct.calcsize(fmt)
         buf = sock.recv(sz)
         _, _, _, roll, pitch, yaw  = struct.unpack(fmt, buf)
-        # TODO
-        return None
+        parrot_data = {'att': [roll, pitch, yaw]}
     else:
         assert(0)
         return None
@@ -525,7 +582,7 @@ if __name__ == '__main__':
         sys.exit(-1)
 
     avg_rate = avg_rate()
-    navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y)
+    navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y, cfg.LANDING_ANGLE)
     plot_sock = create_plot_sock()
 
     navigator.start()
@@ -551,6 +608,9 @@ if __name__ == '__main__':
             elif 'vel' in parrot_data:
                 # Fuse velocity
                 droneloc.kf_process_vel(parrot_data)
+            elif 'att' in parrot_data:
+                # PID control orientation
+                navigator.orient_drone(parrot_data['att'][2])
 
         if loc is None:
             continue
@@ -567,7 +627,7 @@ if __name__ == '__main__':
         rate = avg_rate()
 
         # PID control
-        navigator.navigate_drone(x, y)
+        navigator.navigate_drone(x, y, z)
 
         # Send all math output to the plot
         ts = time.time()

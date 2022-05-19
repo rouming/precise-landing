@@ -108,16 +108,12 @@ class FlightListener(olympe.EventListener):
                                     event.args['longitude'],
                                     event.args['altitude']))
 
-    def ned_to_enu_coords(self, vec):
-        return (vec[1], vec[0], -vec[2])
-
     @olympe.listen_event(SpeedChanged())
     def onSpeedChanged(self, event, scheduler):
         print("velocity = [{speedX:.3f},{speedY:.3f},{speedZ:.3f}] ".format(**event.args))
         vel = (event.args['speedX'],
                event.args['speedY'],
                event.args['speedZ'])
-        vel = self.ned_to_enu_coords(vel)
         self.send_parrot_telemetry(event_type.VELOCITY, "fff", vel)
 
     @olympe.listen_event(AltitudeChanged())
