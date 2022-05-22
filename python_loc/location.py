@@ -23,6 +23,7 @@ import os
 import re
 import sys
 import signal
+from collections import namedtuple
 
 import filterpy.kalman
 from droneloc import drone_localization
@@ -64,6 +65,13 @@ class parrot_event_type(enum.Enum):
     ATTITUDE = 1
     VELOCITY = 2
     POSITION = 3
+
+pid_components = namedtuple('pid_components', 'Kp Ki Kd')
+
+# Default PID config
+xy_pid_comp  = pid_components(Kp=10,  Ki=0, Kd=50)
+yaw_pid_comp = pid_components(Kp=200, Ki=0, Kd=100)
+pid_limits   = (-100, 100)
 
 post_smoother = None
 
@@ -121,13 +129,6 @@ def rotate_vec_on_xy_angle(vec, xy_angle):
     return np.dot(rot, np.array(vec))
 
 class drone_navigator(threading.Thread):
-    # PID tuning files, format is: float float float [float, float]
-    pid_tuning_file = "./pid.tuning"
-
-    # Default PID config
-    default_pid_components = (10, 30, 0.1)
-    default_pid_limits = (-100, 100)
-
     # Thread data
     in_pos = None
     in_yaw = None
@@ -147,22 +148,20 @@ class drone_navigator(threading.Thread):
         # Create commands sock
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-        components = self.default_pid_components
-
         # Set desired landing coordinates
-        x_pid = PID(Kp=components[0], Ki=components[1], Kd=components[2],
+        x_pid = PID(Kp=xy_pid_comp.Kp, Ki=xy_pid_comp.Ki, Kd=xy_pid_comp.Kd,
                     proportional_on_measurement=False)
-        y_pid = PID(Kp=components[0], Ki=components[1], Kd=components[2],
+        y_pid = PID(Kp=xy_pid_comp.Kp, Ki=xy_pid_comp.Ki, Kd=xy_pid_comp.Kd,
                     proportional_on_measurement=False)
-        yaw_pid = PID(Kp=200, Ki=0, Kd=100,
+        yaw_pid = PID(Kp=yaw_pid_comp.Kp, Ki=yaw_pid_comp.Ki, Kd=yaw_pid_comp.Kd,
                       setpoint=target_yaw,
                       proportional_on_measurement=False,
                       error_map=normalize_angle)
 
         # Control coeff limits
-        x_pid.output_limits = self.default_pid_limits
-        y_pid.output_limits = self.default_pid_limits
-        yaw_pid.output_limits = self.default_pid_limits
+        x_pid.output_limits = pid_limits
+        y_pid.output_limits = pid_limits
+        yaw_pid.output_limits = pid_limits
 
         self.start_time = time.time()
 
@@ -181,27 +180,6 @@ class drone_navigator(threading.Thread):
         buf = struct.pack("bbbb", int(roll), int(pitch), int(yaw), int(throttle))
         self.sock.sendto(buf, (cfg.UDP_COMMANDS_IP, cfg.UDP_COMMANDS_PORT))
 
-    def _pid_tuning(self, pid, tuning_file):
-        tunings = self.default_pid_components
-        limits = self.default_pid_limits
-
-        if os.path.exists(tuning_file):
-            with open(tuning_file, "r") as file:
-                line = file.readline()
-                components = re.findall(r"[-+]?\d*\.\d+|[-+]?\d+", line)
-                if len(components) >= 3:
-                    # To floats
-                    components = [float(f) for f in components]
-                    tunings = components[0:3]
-                    if pid.Kp != tunings[0] or pid.Ki != tunings[1] or \
-                       pid.Kd != tunings[2]:
-                        pid.reset()
-                    if len(components) >= 5:
-                        limits = components[3:5]
-
-        pid.tunings = tunings
-        pid.output_limits = limits
-
     def run(self):
         while not should_stop:
             time.sleep(1/PID_CONTROL_RATE_HZ)
@@ -219,9 +197,6 @@ class drone_navigator(threading.Thread):
             control_y = 0
 
             if in_pos is not None:
-                self._pid_tuning(self.x_pid, self.pid_tuning_file)
-                self._pid_tuning(self.y_pid, self.pid_tuning_file)
-
                 # Drone yaw angle relative to the landing area
                 yaw_angle = in_yaw - self.target_yaw
 
@@ -240,6 +215,7 @@ class drone_navigator(threading.Thread):
             roll = int(control_x)
             pitch = int(control_y)
             yaw = int(control_yaw)
+
             self._send_command(roll, pitch, yaw, 0)
 
             self.roll = roll
