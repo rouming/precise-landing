@@ -56,10 +56,17 @@ total_calc = 0
 
 PID_CONTROL_RATE_HZ = 2
 
-XY_LANDING_ERROR      = 0.10
-YAW_LANDING_ERROR     = 0.01
 LANDING_ALT           = 0.5
 LANDING_SETTLING_SECS = 1
+YAW_LANDING_ERROR     = 0.01
+
+# From higher altitude the landing error is higher
+# and then linearly decreases, i.e. on the 10m
+# altitude error is 2.8m, but on the 1m error
+# decreases to 0.1m
+def XY_LANDING_ERROR(alt):
+    err = 0.3*alt - 0.2
+    return np.clip(err, 0.1, 3)
 
 class dwm_source(enum.Enum):
     BLE = 0
@@ -216,13 +223,14 @@ class drone_navigator(threading.Thread):
 
                 # Translate drone position into target frame
                 drone_pos = -target_pos
+                altitude = drone_pos[2]
 
                 control_x = self.x_pid(drone_pos[0])
                 control_y = self.y_pid(drone_pos[1])
 
                 # Calculate XY error
                 xy_error = np.abs(drone_pos[:2] - np.zeros(2))
-                xy_ready = np.all(xy_error < XY_LANDING_ERROR)
+                xy_ready = np.all(xy_error < XY_LANDING_ERROR(altitude))
 
                 # Calculate yaw error
                 yaw_error = np.abs(normalize_angle(yaw_angle))
@@ -234,7 +242,7 @@ class drone_navigator(threading.Thread):
                     if ready_to_land_ts is None:
                         ready_to_land_ts = now
                     elif now - ready_to_land_ts >= LANDING_SETTLING_SECS:
-                        if drone_pos[2] <= LANDING_ALT:
+                        if altitude <= LANDING_ALT:
                             # Initiate landing. Clumsy, but no extra landing
                             # command is needed
                             control_thr = -128
