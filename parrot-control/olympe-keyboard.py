@@ -79,6 +79,15 @@ UDP_TELEMETRY_PORT = 5556
 UDP_COMMANDS_IP = '127.0.0.1'
 UDP_COMMANDS_PORT = 5557
 
+def drone_pcmd(roll, pitch, yaw, throttle):
+    return PCMD(1, roll, pitch, yaw, throttle, timestampAndSeqNum=0)
+
+def drone_takeoff():
+    return TakeOff()
+
+def drone_land():
+    return Landing()
+
 class FlightListener(olympe.EventListener):
     def __init__(self, drone):
         # Create telemetry sock
@@ -213,6 +222,10 @@ class KeyboardCtrl(Listener):
             or bool(self.throttle())
         )
 
+    def get_piloting_cmd(self):
+        return drone_pcmd(self.roll(), self.pitch(),
+                          self.yaw(), self.throttle())
+
     def _rate_limit_cmd(self, ctrl, delay):
         now = time.time()
         if self._last_action_ts[ctrl] > (now - delay):
@@ -253,25 +266,6 @@ class KeyboardCtrl(Listener):
 
         return ctrl_keys
 
-class DronePilotingCmd():
-    def __init__(self, roll, pitch, yaw, throttle):
-        self._roll = roll
-        self._pitch = pitch
-        self._yaw = yaw
-        self._throttle = throttle
-
-    def roll(self):
-        return self._roll
-
-    def pitch(self):
-        return self._pitch
-
-    def yaw(self):
-        return self._yaw
-
-    def throttle(self):
-        return self._throttle
-
 class SockCtrl():
     def __init__(self):
         # Create commands sock
@@ -298,7 +292,11 @@ class SockCtrl():
         off = 0
         while off < len(buf):
             (roll, pitch, yaw, throttle) = struct.unpack_from(fmt, buf, off)
-            self._cmds.append(DronePilotingCmd(roll, pitch, yaw, throttle))
+            # Looks clumsy, but does not introduce land commands
+            if throttle == -128:
+                self._cmds.append(drone_land())
+                throttle = 0
+            self._cmds.append(drone_pcmd(roll, pitch, yaw, throttle))
             off += sz;
 
     def has_piloting_cmd(self):
@@ -307,15 +305,6 @@ class SockCtrl():
 
     def get_piloting_cmd(self):
         return self._cmds.pop(0)
-
-def send_drone_pcmd(drone, cmd):
-    drone(PCMD(1,
-               cmd.roll(),
-               cmd.pitch(),
-               cmd.yaw(),
-               cmd.throttle(),
-               timestampAndSeqNum=0)
-    )
 
 if __name__ == "__main__":
     # Reduce log level
@@ -331,16 +320,16 @@ if __name__ == "__main__":
             other_input_blocked = kb_ctrl.other_input_blocked()
 
             if kb_ctrl.takeoff():
-                drone(TakeOff())
+                drone(drone_takeoff())
             elif kb_ctrl.landing():
-                drone(Landing())
+                drone(drone_land())
 
             if kb_ctrl.has_piloting_cmd():
-                send_drone_pcmd(drone, kb_ctrl)
+                drone(kb_ctrl.get_piloting_cmd())
             elif sock_ctrl.has_piloting_cmd():
                 cmd = sock_ctrl.get_piloting_cmd()
                 if not other_input_blocked:
-                    send_drone_pcmd(drone, cmd)
+                    drone(cmd)
             elif other_input_blocked:
                 # We send STOP cmd only if no other input
                 drone(PCMD(0, 0, 0, 0, 0, timestampAndSeqNum=0))
