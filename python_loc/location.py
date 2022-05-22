@@ -56,6 +56,11 @@ total_calc = 0
 
 PID_CONTROL_RATE_HZ = 2
 
+XY_LANDING_ERROR      = 0.10
+YAW_LANDING_ERROR     = 0.01
+LANDING_ALT           = 0.5
+LANDING_SETTLING_SECS = 1
+
 class dwm_source(enum.Enum):
     BLE = 0
     SOCK = 1
@@ -181,6 +186,9 @@ class drone_navigator(threading.Thread):
         self.sock.sendto(buf, (cfg.UDP_COMMANDS_IP, cfg.UDP_COMMANDS_PORT))
 
     def run(self):
+
+        ready_to_land_ts = None
+
         while not should_stop:
             time.sleep(1/PID_CONTROL_RATE_HZ)
 
@@ -193,8 +201,9 @@ class drone_navigator(threading.Thread):
                 continue
 
             control_yaw = self.yaw_pid(in_yaw)
-            control_x = 0
-            control_y = 0
+            control_x   = 0
+            control_y   = 0
+            control_thr = 0
 
             if in_pos is not None:
                 # Drone yaw angle relative to the landing area
@@ -211,12 +220,39 @@ class drone_navigator(threading.Thread):
                 control_x = self.x_pid(drone_pos[0])
                 control_y = self.y_pid(drone_pos[1])
 
-            # Parrot accepts in signed percentage, i.e. [-100, 100] range
-            roll = int(control_x)
-            pitch = int(control_y)
-            yaw = int(control_yaw)
+                # Calculate XY error
+                xy_error = np.abs(drone_pos[:2] - np.zeros(2))
+                xy_ready = np.all(xy_error < XY_LANDING_ERROR)
 
-            self._send_command(roll, pitch, yaw, 0)
+                # Calculate yaw error
+                yaw_error = np.abs(normalize_angle(yaw_angle))
+                yaw_ready = np.all(yaw_error < YAW_LANDING_ERROR)
+
+                # Make a decision if we descend or initiate landing
+                if xy_ready and yaw_ready:
+                    now = time.time()
+                    if ready_to_land_ts is None:
+                        ready_to_land_ts = now
+                    elif now - ready_to_land_ts >= LANDING_SETTLING_SECS:
+                        if drone_pos[2] <= LANDING_ALT:
+                            # Initiate landing. Clumsy, but no extra landing
+                            # command is needed
+                            control_thr = -128
+                        else:
+                            control_thr = -20
+
+                        # Settle once again on the next descend iteration
+                        ready_to_land_ts = None
+                else:
+                    ready_to_land_ts = None
+
+            # Parrot accepts in signed percentage, i.e. [-100, 100] range
+            roll  = int(control_x)
+            pitch = int(control_y)
+            yaw   = int(control_yaw)
+            thr   = int(control_thr)
+
+            self._send_command(roll, pitch, yaw, thr)
 
             self.roll = roll
             self.pitch = pitch
