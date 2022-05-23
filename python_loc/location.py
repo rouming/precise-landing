@@ -262,6 +262,13 @@ class drone_navigator(threading.Thread):
                 else:
                     ready_to_land_ts = None
 
+                print("PID CONTROL X=%4d Y=%4d YAW=%4d, DP=(%.2f %.2f %.2f) YAW=(%.3f°) %s" %
+                      (int(control_x), int(control_y), int(control_yaw),
+                       drone_pos[0], drone_pos[1], drone_pos[2], in_yaw,
+                       '| LAND' if control_thr < -100  else \
+                       '| DESC' if control_thr else ''
+                       ))
+
             # Parrot accepts in signed percentage, i.e. [-100, 100] range
             roll  = int(control_x)
             pitch = int(control_y)
@@ -567,7 +574,7 @@ def get_dwm_location_or_parrot_data():
 
         if dwm_fd in rd:
             loc = receive_dwm_location(dwm_fd)
-            print_location(loc)
+            #print_location(loc)
 
             if is_dwm_location_reliable(loc):
                 received = True
