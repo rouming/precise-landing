@@ -5,6 +5,15 @@ import struct
 import olympe
 import subprocess
 import time
+import math
+from olympe.messages import gimbal
+from olympe.messages.camera import (
+    start_recording,
+    stop_recording,
+    set_camera_mode,
+    set_recording_mode,
+)
+from olympe.messages.camera2.Command import StartRecording, StopRecording
 from olympe.messages.skyctrl.CoPiloting import setPilotingSource
 from olympe.messages.ardrone3.Piloting import TakeOff, Landing, PCMD
 from olympe.messages.ardrone3.PilotingState import (
@@ -34,10 +43,12 @@ class Ctrl(Enum):
         MOVE_DOWN,
         TURN_LEFT,
         TURN_RIGHT,
+        START_RECORDING,
+        STOP_RECORDING,
 
         UNBLOCK_OTHER_INPUT,
         BLOCK_OTHER_INPUT,
-    ) = range(13)
+    ) = range(15)
 
 
 QWERTY_CTRL_KEYS = {
@@ -52,6 +63,8 @@ QWERTY_CTRL_KEYS = {
     Ctrl.MOVE_DOWN: Key.down,
     Ctrl.TURN_LEFT: Key.left,
     Ctrl.TURN_RIGHT: Key.right,
+    Ctrl.START_RECORDING: "r",
+    Ctrl.STOP_RECORDING: "p",
 
     Ctrl.UNBLOCK_OTHER_INPUT: "u",  # "unblock" other input
     Ctrl.BLOCK_OTHER_INPUT: "b", # "block" other input
@@ -79,14 +92,47 @@ UDP_TELEMETRY_PORT = 5556
 UDP_COMMANDS_IP = '127.0.0.1'
 UDP_COMMANDS_PORT = 5557
 
-def drone_pcmd(roll, pitch, yaw, throttle):
+def drone_cmd_pcmd(roll, pitch, yaw, throttle):
     return PCMD(1, roll, pitch, yaw, throttle, timestampAndSeqNum=0)
 
-def drone_takeoff():
+def drone_cmd_takeoff():
     return TakeOff()
 
-def drone_land():
+def drone_cmd_land():
     return Landing()
+
+def drone_setup_gimbal():
+    # Assume max gimbal speed
+    drone(gimbal.set_max_speed(
+        gimbal_id=0,
+        yaw=90,
+        pitch=90,
+        roll=90)).wait()
+
+    # Camera looks down
+    drone(gimbal.set_target(
+        gimbal_id=0,
+        control_mode="position",
+        yaw_frame_of_reference="none",   # None instead of absolute
+        yaw=0.0,
+        pitch_frame_of_reference="absolute",
+        pitch=-90,
+        roll_frame_of_reference="none",     # None instead of absolute
+        roll=0.0,
+    )).wait()
+
+
+def drone_start_recording(drone):
+    drone(set_camera_mode(cam_id=0, value="recording"))
+    drone(set_recording_mode(cam_id=0,
+                             mode="standard",
+                             resolution="res_1080p",
+                             framerate="fps_60",
+                             hyperlapse="ratio_60"))
+    drone(start_recording(cam_id=0))
+
+def drone_stop_recording(drone):
+    drone(stop_recording(cam_id=0))
 
 class FlightListener(olympe.EventListener):
     def __init__(self, drone):
@@ -223,8 +269,8 @@ class KeyboardCtrl(Listener):
         )
 
     def get_piloting_cmd(self):
-        return drone_pcmd(self.roll(), self.pitch(),
-                          self.yaw(), self.throttle())
+        return drone_cmd_pcmd(self.roll(), self.pitch(),
+                              self.yaw(), self.throttle())
 
     def _rate_limit_cmd(self, ctrl, delay):
         now = time.time()
@@ -241,6 +287,12 @@ class KeyboardCtrl(Listener):
 
     def landing(self):
         return self._rate_limit_cmd(Ctrl.LANDING, 2.0)
+
+    def start_recording(self):
+        return self._rate_limit_cmd(Ctrl.START_RECORDING, 2.0)
+
+    def stop_recording(self):
+        return self._rate_limit_cmd(Ctrl.STOP_RECORDING, 2.0)
 
     def _get_ctrl_keys(self, ctrl_keys):
         # Get the default ctrl keys based on the current keyboard layout:
@@ -294,9 +346,9 @@ class SockCtrl():
             (roll, pitch, yaw, throttle) = struct.unpack_from(fmt, buf, off)
             # Looks clumsy, but does not introduce land commands
             if throttle == -128:
-                self._cmds.append(drone_land())
+                self._cmds.append(drone_cmd_land())
                 throttle = 0
-            self._cmds.append(drone_pcmd(roll, pitch, yaw, throttle))
+            self._cmds.append(drone_cmd_pcmd(roll, pitch, yaw, throttle))
             off += sz;
 
     def has_piloting_cmd(self):
@@ -314,15 +366,21 @@ if __name__ == "__main__":
     with FlightListener(drone):
         drone.connect()
         drone(setPilotingSource(source="Controller")).wait()
+        drone_setup_gimbal()
+
         kb_ctrl = KeyboardCtrl()
         sock_ctrl = SockCtrl()
         while not kb_ctrl.quit():
             other_input_blocked = kb_ctrl.other_input_blocked()
 
             if kb_ctrl.takeoff():
-                drone(drone_takeoff())
+                drone(drone_cmd_takeoff())
             elif kb_ctrl.landing():
-                drone(drone_land())
+                drone(drone_cmd_land())
+            elif kb_ctrl.start_recording():
+                drone_start_recording(drone)
+            elif kb_ctrl.stop_recording():
+                drone_stop_recording(drone)
 
             if kb_ctrl.has_piloting_cmd():
                 drone(kb_ctrl.get_piloting_cmd())
