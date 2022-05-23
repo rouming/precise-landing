@@ -68,6 +68,14 @@ def XY_LANDING_ERROR(alt):
     err = 0.3*alt - 0.2
     return np.clip(err, 0.1, 3)
 
+# The rate of descent depends on the altitude in order
+# to have a faster descent if the altitude is high and
+# a more accurate descent if drone is close to the ground.
+# Here we return -20 min on <= 1m and -100 max on >= 5m
+def descend_control_rate(alt):
+    rate = -20*alt
+    return np.clip(rate, -20, -100)
+
 class dwm_source(enum.Enum):
     BLE = 0
     SOCK = 1
@@ -247,7 +255,7 @@ class drone_navigator(threading.Thread):
                             # command is needed
                             control_thr = -128
                         else:
-                            control_thr = -20
+                            control_thr = descend_control_rate(altitude)
 
                         # Settle once again on the next descend iteration
                         ready_to_land_ts = None
