@@ -40,14 +40,17 @@ class smoother_type(enum.Enum):
     UNIFORM  = 1
     GAUSSIAN = 2
 
-sigma_process = 0.225
+sigma_accel = 0.1
 sigma_dist = 0.2
+# Values taken from hovering drone
+#sigma_vel = 0.01
+#sigma_alt = 0.005
 sigma_vel = 0.05
 sigma_alt = 0.02
 
 R_scale = 1
 Q_scale = 1
-z_damping_factor = 1
+z_damping_factor = 0.5
 
 dt = 0.2
 hist_window = 25
@@ -90,12 +93,13 @@ def F_6(x, dt):
 
 
 def Q_6(dt):
-    #Q = filterpy.common.Q_discrete_white_noise(dim=2, dt=dt, var=sigma_process**2, block_size=3)
-    q = [[dt**4 / 3, dt**3 / 2],
-         [dt**3 / 2, dt**2]]
-    qz = np.array(q) * z_damping_factor
+    #Q = filterpy.common.Q_discrete_white_noise(dim=2, dt=dt, var=sigma_accel**2, block_size=3)
+    q = np.array([[dt**4 / 4, dt**3 / 2],
+                  [dt**3 / 2, dt**2]])
+    # Take damping into considiration on Z axis
+    qz = q * z_damping_factor
     Q = block_diag(q, q, qz)
-    Q *= sigma_process**2
+    Q *= sigma_accel**2
     Q *= Q_scale
 
     return Q
