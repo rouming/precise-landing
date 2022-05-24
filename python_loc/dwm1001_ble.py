@@ -8,6 +8,8 @@ import time
 import eventfd
 import signal
 import sys
+from file_to_sock import send_dwm_data, create_dwm_sock
+import config as cfg
 
 DWM_SERVICE_UUID        = '680c21d9-c946-4c1f-9c11-baa1c21329e7'
 DWM_LOCATION_DATA_UUID  = '003bbdf2-c634-4b3d-ab56-7ec889b89a37'
@@ -219,7 +221,7 @@ class DWMDevice(gatt.Device):
                         float(y) / 1000,
                         float(z) / 1000 ],
             'qf': qf,
-            'valid': True,
+            'valid': 1,
         }
 
         return off
@@ -238,7 +240,7 @@ class DWMDevice(gatt.Device):
             i += 1
 
             # Find position of the anchor by the node address
-            valid = True
+            valid = 1
             coords = [0.0, 0.0, 0.0]
             if addr in self.manager.predefined_anchors:
                 coords = self.manager.predefined_anchors[addr]
@@ -250,7 +252,7 @@ class DWMDevice(gatt.Device):
 
                 coords = device.location['pos']['coords']
             else:
-                valid = False
+                valid = 0
 
             anchor = {
                 'addr': addr,
@@ -285,7 +287,7 @@ class DWMDevice(gatt.Device):
             'pos': {
                 'coords': [0.0, 0.0, 0.0],
                 'qf': 0,
-                'valid': False,
+                'valid': 0,
             },
             'ts': time.time(),
             'anchors': [],
@@ -326,11 +328,12 @@ help = \
 """DWM1001 BLE
 
 Usage:
-  dwm1001_ble.py --tag-addr <addr>
+  dwm1001_ble.py --tag-addr <addr> [--stream-to-sock]
 
 Options:
   -h --help              Show this screen
   --tag-addr <addr>      Tag node address in hex
+  --stream-to-sock       Stream DWM location to sock
 """
 
 from docopt import docopt
@@ -338,6 +341,15 @@ import select
 
 should_stop = False
 efd = eventfd.EventFD()
+
+def coords_to_mm(pos):
+    pos['coords'] = [int(v * 1000) for v in pos['coords']]
+
+def coords_and_dist_to_mm(loc):
+    coords_to_mm(loc['pos'])
+    for anchor in loc['anchors']:
+        coords_to_mm(anchor['pos'])
+        anchor['dist']['dist'] = int(anchor['dist']['dist'] * 1000)
 
 def signal_handler(sig, frame):
     print(' You pressed Ctrl+C! Disconnecting all devices ...')
@@ -353,8 +365,13 @@ if __name__ == '__main__':
     tag = None
     ts = time.time()
 
-    manager = DWMDeviceManager(adapter_name='hci0', eventfd_map={tag_addr: efd})
+    manager = DWMDeviceManager(adapter_name='hci0',
+                               predefined_anchors=cfg.ANCHORS,
+                               eventfd_map={tag_addr: efd})
     manager.start()
+
+    if args['--stream-to-sock']:
+        dwm_sock = create_dwm_sock()
 
     while not should_stop:
         r, w, e = select.select([efd], [], [])
@@ -370,6 +387,11 @@ if __name__ == '__main__':
         rate = 1 / (now - ts)
         ts = now
         loc = tag.get_location()
+
+        if args['--stream-to-sock']:
+            # We pass through sock integers, not floats
+            coords_and_dist_to_mm(loc)
+            send_dwm_data(dwm_sock, loc)
 
         print("XYZ = (%.2fm %.2fm %.2fm) %3.0fHz" % \
               (loc['pos']['coords'][0],

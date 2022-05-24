@@ -34,12 +34,12 @@ PARROT_IP = "127.0.0.1"
 PARROT_PORT = 5556
 
 last_ts = 0
-last_ts_s = 0
-last_ts_us = 0
-
 speed = 2
 
-def send_parrot_data(line):
+def create_parrot_sock():
+    return socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+def send_parrot_data(parrot_sock, line):
     fields = line[line.find("alt") : -1].split(" ")
     fmt = "iiffff"
 
@@ -48,11 +48,20 @@ def send_parrot_data(line):
     pitch = float(fields[5])
     yaw = float(fields[7])
 
-    buff = ctypes.create_string_buffer(512)
-    struct.pack_into(fmt, buff, 0, last_ts_s, last_ts_us, alt, roll, pitch, yaw)
-    parot_sock.sendto(buff, (PARROT_IP, PARROT_PORT))
+    ts_s , ts_us = str(last_ts).split(".")
+    ts_s = int(ts_s)
+    ts_us = int(ts_us)
 
-def send_dwm_data(loc):
+    buff = ctypes.create_string_buffer(512)
+    struct.pack_into(fmt, buff, 0, ts_s, ts_us, alt, roll, pitch, yaw)
+    parrot_sock.sendto(buff, (PARROT_IP, PARROT_PORT))
+
+def create_dwm_sock():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL)
+    return sock
+
+def send_dwm_data(dwm_sock, loc):
     nr_anchors = len(loc['anchors'])
 
     fmt = "iiihhiii"
@@ -60,10 +69,14 @@ def send_dwm_data(loc):
 
     pos = loc['pos']
 
+    ts_s , ts_us = str(loc['ts']).split(".")
+    ts_s = int(ts_s)
+    ts_us = int(ts_us)
+
     # (x, y, z, pos_qf, pos_valid, ts_sec, ts_usec, nr_anchors)
     struct.pack_into(fmt, buff, 0,
                      *pos['coords'], pos['qf'], pos['valid'],
-                     loc['ts_s'], loc['ts_us'], nr_anchors)
+                     ts_s, ts_us, nr_anchors)
     off = struct.calcsize(fmt)
 
     for anchor in loc['anchors']:
@@ -78,9 +91,9 @@ def send_dwm_data(loc):
                          anchor["dist"]["qf"])
         off += struct.calcsize(fmt)
 
-    sock.sendto(buff, (MCAST_GRP, MCAST_PORT))
+    dwm_sock.sendto(buff, (MCAST_GRP, MCAST_PORT))
 
-def parse_log_file(data_file):
+def parse_log_file(dwm_sock, parrot_sock, data_file):
     global last_ts, last_ts_s, last_ts_us
 
     while True:
@@ -89,7 +102,7 @@ def parse_log_file(data_file):
             break
 
         if line.startswith("## get parrot data:"):
-            send_parrot_data(line)
+            send_parrot_data(parrot_sock, line)
             continue
 
         if not line.startswith("ts:"):
@@ -97,10 +110,6 @@ def parse_log_file(data_file):
         line = line.replace(" ", "")
 
         ts = line[line.find(":")+1 : line.find("[")]
-        ts_s , ts_us = ts.split(".")
-        ts_s = int(ts_s)
-        ts_us = int(ts_us)
-
         vals = line[line.find("[")+1 : line.find("]")]
         vals = vals.split(",")
 
@@ -111,8 +120,7 @@ def parse_log_file(data_file):
                 'qf': int(vals[3]),
                 'valid': True
             },
-            'ts_s': ts_s,
-            'ts_us': ts_us,
+            'ts': ts,
         }
 
         anchor_cnt = 0
@@ -156,19 +164,15 @@ def parse_log_file(data_file):
             anchor_cnt += 1
 
         loc['anchors'] = anchors
-        send_dwm_data(loc)
+        send_dwm_data(dwm_sock, loc)
 
         if last_ts != 0:
             delay = (float(ts) - last_ts) / speed
             print("cur time: {} delay: {}".format(float(ts), delay))
             time.sleep(delay)
-            last_ts = float(ts)
-            last_ts_s = ts_s
-            last_ts_us = ts_us
-        else:
-            last_ts = float(ts)
+        last_ts = float(ts)
 
-def parse_trajectory_file(args, data_file):
+def parse_trajectory_file(dwm_sock, args, data_file):
     anchors_args = args['--anchor']
     if len(anchors_args) < 3:
         print("Error: at least 3 anchors should be specified")
@@ -206,10 +210,6 @@ def parse_trajectory_file(args, data_file):
             break
 
         ts = time.time()
-        ts_us, ts_s = math.modf(ts)
-        ts_us = int(ts_us * 1000000)
-        ts_s = int(ts_s)
-
         coords = line.split(',')
         if len(coords) != 3:
             print("Error: trajectory file is incorrect format")
@@ -223,8 +223,7 @@ def parse_trajectory_file(args, data_file):
                 'qf': 100,
                 'valid': True,
             },
-            'ts_s': ts_s,
-            'ts_us': ts_us,
+            'ts': ts,
         }
 
         for anchor in anchors:
@@ -241,7 +240,7 @@ def parse_trajectory_file(args, data_file):
             }
 
         loc['anchors'] = anchors
-        send_dwm_data(loc)
+        send_dwm_data(dwm_sock, loc)
 
         # Frequency to duration
         delay = 1 / 5
@@ -251,12 +250,11 @@ def parse_trajectory_file(args, data_file):
 if __name__ == '__main__':
     args = docopt(__doc__)
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL)
-    parot_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock = create_dwm_sock()
+    parrot_sock = create_parrot_sock()
     data_file = open(args['--file'], 'r')
 
     if args['parse-log']:
-        parse_log_file(data_file)
+        parse_log_file(dwm_sock, parrot_sock, data_file)
     elif args['parse-trajectory']:
-        parse_trajectory_file(args, data_file)
+        parse_trajectory_file(dwm_sock, args, data_file)
