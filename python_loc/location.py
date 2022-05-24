@@ -45,8 +45,10 @@ parrot_sock = None
 plot_sock   = None
 
 dwm_manager = None
-
 nano33_manager = None
+post_smoother = None
+last_loc_anchors = None
+last_loc_update_nr = 0
 
 should_stop = False
 stop_efd    = eventfd.EventFD()
@@ -59,6 +61,10 @@ PID_CONTROL_RATE_HZ = 2
 LANDING_ALT           = 0.5
 LANDING_SETTLING_SECS = 1
 YAW_LANDING_ERROR     = 0.01
+
+# How many times we can accept other data without
+# major DWM location updates
+UNRELIABLE_UPDATES    = 4
 
 # From higher altitude the landing error is higher
 # and then linearly decreases, i.e. on the 10m
@@ -92,8 +98,6 @@ pid_components = namedtuple('pid_components', 'Kp Ki Kd')
 xy_pid_comp  = pid_components(Kp=10,  Ki=0, Kd=50)
 yaw_pid_comp = pid_components(Kp=200, Ki=0, Kd=100)
 pid_limits   = (-100, 100)
-
-post_smoother = None
 
 DWM_DATA_SOURCE = dwm_source.BLE
 
@@ -522,7 +526,52 @@ def receive_parrot_data_from_sock(sock):
     return parrot_data
 
 def is_dwm_location_reliable(loc):
-    return len(loc['anchors']) >= 2
+    global last_loc_update_nr, last_loc_anchors
+
+    anchors = loc['anchors']
+
+    if len(anchors) < 2:
+        # 1 anchor in always unreliable
+        print("!!! Warning: got 1 anchor, consider as unreliable")
+        return False
+
+    if len(anchors) > 3:
+        # 4 anchors and more are always reliable
+        last_loc_anchors = anchors
+        last_loc_anchors_nr = 0
+        return True
+
+    if last_loc_anchors is None:
+        # For the first time
+        last_loc_anchors = anchors
+        last_loc_anchors_nr = 0
+        return True
+
+    if len(anchors) > len(last_loc_anchors):
+        # More anchors than previously is always a good sign
+        last_loc_anchors = anchors
+        last_loc_anchors_nt = 0
+        return True
+
+    # Compare anchors addresses one by one
+    for anch in anchors:
+        for last_anch in last_loc_anchors:
+            if anch['addr'] != last_anch['addr']:
+                # A new anchor in a set is always a good sign
+                last_loc_anchors = anchors
+                last_loc_anchors_nr = 0
+                return True
+
+    last_loc_anchors = anchors
+
+    if last_loc_anchors_nr < UNRELIABLE_UPDATES:
+        # All anchors are the same, account similar update
+        last_loc_anchors_nr += 1
+        return True
+
+    print("!!! Warning: got same %d anchors for %d number of updates, consider as unreliable" %
+          (len(anchors), UNRELIABLE_UPDATES))
+    return False
 
 def print_location(loc):
     coords = loc['pos']['coords']
@@ -634,7 +683,7 @@ if __name__ == '__main__':
         if should_stop:
             break
 
-        if parrot_data is not None and without_dwm_data < 4:
+        if parrot_data is not None and without_dwm_data < UNRELIABLE_UPDATES:
             without_dwm_data += 1
 
             if 'alt' in parrot_data:
