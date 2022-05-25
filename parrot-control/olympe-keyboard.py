@@ -101,6 +101,9 @@ def drone_cmd_takeoff():
 def drone_cmd_land():
     return Landing()
 
+def is_drone_cmd_land(cmd):
+    return cmd.command_message.name == "Landing"
+
 def drone_setup_gimbal():
     # Assume max gimbal speed
     drone(gimbal.set_max_speed(
@@ -224,6 +227,9 @@ class KeyboardCtrl(Listener):
         self._key_pressed[char] = False
 
         return True
+
+    def block_other_input(self):
+        self._other_input_blocked = True
 
     def other_input_blocked(self):
         return self._other_input_blocked
@@ -377,6 +383,8 @@ if __name__ == "__main__":
                 drone(drone_cmd_takeoff())
             elif kb_ctrl.landing():
                 drone(drone_cmd_land())
+                # Block other input after landing
+                kb_ctrl.block_other_input()
             elif kb_ctrl.start_recording():
                 drone_start_recording(drone)
             elif kb_ctrl.stop_recording():
@@ -388,6 +396,9 @@ if __name__ == "__main__":
                 cmd = sock_ctrl.get_piloting_cmd()
                 if not other_input_blocked:
                     drone(cmd)
+                    if is_drone_cmd_land(cmd):
+                        # Block other input after landing
+                        kb_ctrl.block_other_input()
             elif other_input_blocked:
                 # We send STOP cmd only if no other input
                 drone(PCMD(0, 0, 0, 0, 0, timestampAndSeqNum=0))
