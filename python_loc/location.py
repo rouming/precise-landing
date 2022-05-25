@@ -16,7 +16,6 @@ import math
 import socket
 import struct
 import select
-import threading
 import eventfd
 import enum
 import os
@@ -51,11 +50,11 @@ last_loc_update_nr = 0
 should_stop = False
 stop_efd    = eventfd.EventFD()
 
-PID_CONTROL_RATE_HZ = 2
-
+MAX_PID_DT            = 1
 LANDING_ALT           = 0.5
 LANDING_SETTLING_SECS = 1
 YAW_LANDING_ERROR     = 0.01
+YAW_OUTDATED_SECS     = 1
 
 # How many times we can accept other data without
 # major DWM location updates
@@ -90,7 +89,7 @@ class parrot_event_type(enum.Enum):
 pid_components = namedtuple('pid_components', 'Kp Ki Kd')
 
 # Default PID config
-xy_pid_comp  = pid_components(Kp=10,  Ki=0, Kd=50)
+xy_pid_comp  = pid_components(Kp=50,  Ki=0, Kd=100)
 yaw_pid_comp = pid_components(Kp=200, Ki=0, Kd=100)
 pid_limits   = (-100, 100)
 
@@ -112,11 +111,8 @@ def rotate_vec_on_xy_angle(vec, xy_angle):
                     [               0,                 0,  1]])
     return np.dot(rot, np.array(vec))
 
-class drone_navigator(threading.Thread):
-    # Thread data
-    in_pos = None
+class drone_navigator():
     in_yaw = None
-    lock =  threading.Lock()
 
     # Target coords and angle
     target_x = 0
@@ -126,7 +122,10 @@ class drone_navigator(threading.Thread):
     # PID output
     pitch = 0
     roll = 0
-    yaw = 0
+
+    ready_to_land_ts = None
+    last_navigate_ts = None
+    last_yaw_ts      = None
 
     def __init__(self, target_x, target_y, target_yaw):
         # Create commands sock
@@ -164,97 +163,95 @@ class drone_navigator(threading.Thread):
         buf = struct.pack("bbbb", int(roll), int(pitch), int(yaw), int(throttle))
         self.sock.sendto(buf, (cfg.UDP_COMMANDS_IP, cfg.UDP_COMMANDS_PORT))
 
-    def run(self):
-
-        ready_to_land_ts = None
-
-        while not should_stop:
-            time.sleep(1/PID_CONTROL_RATE_HZ)
-
-            self.lock.acquire()
-            in_pos = self.in_pos
-            in_yaw = self.in_yaw
-            self.lock.release()
-
-            if in_yaw is None:
-                continue
-
-            control_yaw = self.yaw_pid(in_yaw)
-            control_x   = 0
-            control_y   = 0
-            control_thr = 0
-
-            if in_pos is not None:
-                # Drone yaw angle relative to the landing area
-                yaw_angle = in_yaw - self.target_yaw
-
-                # Target position in the drone frame
-                target_pos = np.array([self.target_x, self.target_y, 0]) - \
-                             np.array(in_pos)
-                target_pos = rotate_vec_on_xy_angle(target_pos, yaw_angle)
-
-                # Translate drone position into target frame
-                drone_pos = -target_pos
-                altitude = drone_pos[2]
-
-                control_x = self.x_pid(drone_pos[0])
-                control_y = self.y_pid(drone_pos[1])
-
-                # Calculate XY error
-                xy_error = np.abs(drone_pos[:2] - np.zeros(2))
-                xy_ready = np.all(xy_error < XY_LANDING_ERROR(altitude))
-
-                # Calculate yaw error
-                yaw_error = np.abs(normalize_angle(yaw_angle))
-                yaw_ready = np.all(yaw_error < YAW_LANDING_ERROR)
-
-                # Make a decision if we descend or initiate landing
-                if xy_ready and yaw_ready:
-                    now = time.time()
-                    if ready_to_land_ts is None:
-                        ready_to_land_ts = now
-                    elif now - ready_to_land_ts >= LANDING_SETTLING_SECS:
-                        if altitude <= LANDING_ALT:
-                            # Initiate landing. Clumsy, but no extra landing
-                            # command is needed
-                            control_thr = -128
-                        else:
-                            control_thr = descend_control_rate(altitude)
-
-                        # Settle once again on the next descend iteration
-                        ready_to_land_ts = None
-                else:
-                    ready_to_land_ts = None
-
-                print("PID CONTROL X=%4d Y=%4d YAW=%4d, DP=(%.2f %.2f %.2f) YAW=(%.3f°) %s" %
-                      (int(control_x), int(control_y), int(control_yaw),
-                       drone_pos[0], drone_pos[1], drone_pos[2], in_yaw,
-                       '| LAND' if control_thr < -100  else \
-                       '| DESC' if control_thr else ''
-                       ))
-
-            # Parrot accepts in signed percentage, i.e. [-100, 100] range
-            roll  = int(control_x)
-            pitch = int(control_y)
-            yaw   = int(control_yaw)
-            thr   = int(control_thr)
-
-            self._send_command(roll, pitch, yaw, thr)
-
-            self.roll = roll
-            self.pitch = pitch
-            self.yaw = yaw
+    def set_yaw_angle(self, yaw):
+        self.in_yaw = yaw
+        self.last_yaw_ts = time.time()
 
     def navigate_drone(self, x, y, z):
-        self.lock.acquire()
-        self.in_pos = (x, y, z)
-        self.lock.release()
+        in_pos = (x, y, z)
 
-    def orient_drone(self, yaw):
-        self.lock.acquire()
-        self.in_yaw = yaw
-        self.lock.release()
+        if self.in_yaw is None:
+            return
 
+        now = time.time()
+
+        if now - self.last_yaw_ts > YAW_OUTDATED_SECS:
+            print("!!! Warning: yaw angle is outdated, ignore navigation cycle")
+            return
+
+        if self.last_navigate_ts is not None and \
+           now - self.last_navigate_ts >= MAX_PID_DT:
+            # Data got stuck, we can't rely on the internal PID state
+            # any more, so do reset
+            self.yaw_pid.reset()
+            self.x_pid.reset()
+            self.y_pid.reset()
+
+        self.last_navigate_ts = now
+
+        # Drone orientation PID control
+        control_yaw = self.yaw_pid(self.in_yaw)
+
+        control_x   = 0
+        control_y   = 0
+        control_thr = 0
+
+        # Drone yaw angle relative to the landing area
+        yaw_angle = self.in_yaw - self.target_yaw
+
+        # Target position in the drone frame
+        target_pos = np.array([self.target_x, self.target_y, 0]) - np.array(in_pos)
+        target_pos = rotate_vec_on_xy_angle(target_pos, yaw_angle)
+
+        # Translate drone position into target frame
+        drone_pos = -target_pos
+        altitude = drone_pos[2]
+
+        control_x = self.x_pid(drone_pos[0])
+        control_y = self.y_pid(drone_pos[1])
+
+        # Calculate XY error
+        xy_error = np.abs(drone_pos[:2] - np.zeros(2))
+        xy_ready = np.all(xy_error < XY_LANDING_ERROR(altitude))
+
+        # Calculate yaw error
+        yaw_error = np.abs(normalize_angle(yaw_angle))
+        yaw_ready = np.all(yaw_error < YAW_LANDING_ERROR)
+
+        # Make a decision if we descend or initiate landing
+        if xy_ready and yaw_ready:
+            if self.ready_to_land_ts is None:
+                self.ready_to_land_ts = now
+            elif now - self.ready_to_land_ts >= LANDING_SETTLING_SECS:
+                if altitude <= LANDING_ALT:
+                    # Initiate landing. Clumsy, but no extra landing
+                    # command is needed
+                    control_thr = -128
+                else:
+                    control_thr = descend_control_rate(altitude)
+
+                # Settle once again on the next descend iteration
+                self.ready_to_land_ts = None
+        else:
+            self.ready_to_land_ts = None
+
+        print("PID CONTROL X=%4d Y=%4d YAW=%4d, DP=(%.2f %.2f %.2f) YAW=(%.1f°) %s" %
+              (int(control_x), int(control_y), int(control_yaw),
+               drone_pos[0], drone_pos[1], drone_pos[2], np.rad2deg(self.in_yaw),
+               '| LAND' if control_thr < -100  else \
+               '| DESC' if control_thr else ''
+            ))
+
+        # Parrot accepts in signed percentage, i.e. [-100, 100] range
+        roll  = int(control_x)
+        pitch = int(control_y)
+        yaw   = int(control_yaw)
+        thr   = int(control_thr)
+
+        self._send_command(roll, pitch, yaw, thr)
+
+        self.roll = roll
+        self.pitch = pitch
 
 def create_dwm_sock():
     # Create sock and bind
@@ -628,7 +625,6 @@ if __name__ == '__main__':
     navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y, cfg.LANDING_ANGLE)
     plot_sock = create_plot_sock()
 
-    navigator.start()
     droneloc = drone_localization(post_smoother=post_smoother)
 
     signal.signal(signal.SIGINT, sigint_handler)
@@ -652,8 +648,8 @@ if __name__ == '__main__':
                 # Fuse velocity
                 droneloc.kf_process_vel(parrot_data)
             elif 'att' in parrot_data:
-                # PID control orientation
-                navigator.orient_drone(parrot_data['att'][2])
+                # Set drone yaw angle
+                navigator.set_yaw_angle(parrot_data['att'][2])
 
         if loc is None:
             continue
