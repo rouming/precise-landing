@@ -38,11 +38,9 @@ from scipy.optimize import minimize
 from simple_pid import PID
 import config as cfg
 
-args        = None
 dwm_fd      = None
 nano33_fd   = None
 parrot_sock = None
-plot_sock   = None
 
 dwm_manager = None
 nano33_manager = None
@@ -52,9 +50,6 @@ last_loc_update_nr = 0
 
 should_stop = False
 stop_efd    = eventfd.EventFD()
-
-total_pos = 0
-total_calc = 0
 
 PID_CONTROL_RATE_HZ = 2
 
@@ -100,41 +95,6 @@ yaw_pid_comp = pid_components(Kp=200, Ki=0, Kd=100)
 pid_limits   = (-100, 100)
 
 DWM_DATA_SOURCE = dwm_source.BLE
-
-#
-# Welford's online algorithm
-# https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance#Welford's_online_algorithm
-#
-class welford_state:
-    count = 0
-    mean = 0
-    m2 = 0
-
-    def avg_welford(self, new_value):
-        self.count += 1
-        delta = new_value - self.mean
-        self.mean += delta / self.count
-        delta2 = new_value - self.mean
-        self.m2 += delta * delta2
-
-        return self.mean;
-
-class avg_rate:
-    welford = welford_state()
-    ts = 0.0
-
-    def __call__(self):
-        rate = 0
-        now = time.time()
-        if self.ts:
-            rate = 1.0 / (now - self.ts)
-            # Disable average, sometimes we have very high @rate
-            # so the whole average goes mad, better to see rate in
-            # momentum
-            #rate = self.welford.avg_welford(rate)
-        self.ts = now
-
-        return rate
 
 def normalize_angle(x):
     x = x % (2 * math.pi)    # force in range [0, 2 pi)
@@ -665,7 +625,6 @@ if __name__ == '__main__':
         print("Error: incorrect --data-source param, should be 'ble' or 'sock'")
         sys.exit(-1)
 
-    avg_rate = avg_rate()
     navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y, cfg.LANDING_ANGLE)
     plot_sock = create_plot_sock()
 
@@ -700,15 +659,13 @@ if __name__ == '__main__':
             continue
 
         without_dwm_data = 0
-        parrot_alt = 0
 
-        start = time.time()
+        # TODO: not used anymore
+        parrot_alt = 0
+        rate = 0
 
         # Invoke distance localization
         x, y, z = droneloc.kf_process_dist(loc)
-
-        # Calculate update rate
-        rate = avg_rate()
 
         # PID control
         navigator.navigate_drone(x, y, z)
