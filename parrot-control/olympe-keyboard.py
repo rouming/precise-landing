@@ -13,9 +13,9 @@ from olympe.messages.camera import (
     set_camera_mode,
     set_recording_mode,
 )
-from olympe.messages.camera2.Command import StartRecording, StopRecording
 from olympe.messages.skyctrl.CoPiloting import setPilotingSource
 from olympe.messages.ardrone3.Piloting import TakeOff, Landing, PCMD
+from olympe.messages.ardrone3.SpeedSettings import MaxRotationSpeed
 from olympe.messages.ardrone3.PilotingState import (
     PositionChanged,
     AlertStateChanged,
@@ -124,6 +124,9 @@ def drone_setup_gimbal():
         roll=0.0,
     )).wait()
 
+def drone_setup_rotation_speed():
+    # In degrees/s
+    drone(MaxRotationSpeed(current=10)).wait()
 
 def drone_start_recording(drone):
     drone(set_camera_mode(cam_id=0, value="recording"))
@@ -373,6 +376,7 @@ if __name__ == "__main__":
         drone.connect()
         drone(setPilotingSource(source="Controller")).wait()
         drone_setup_gimbal()
+        drone_setup_rotation_speed()
 
         kb_ctrl = KeyboardCtrl()
         sock_ctrl = SockCtrl()
