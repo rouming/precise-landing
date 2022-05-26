@@ -126,7 +126,7 @@ def drone_setup_gimbal():
 
 def drone_setup_rotation_speed():
     # In degrees/s
-    drone(MaxRotationSpeed(current=10)).wait()
+    drone(MaxRotationSpeed(current=90)).wait()
 
 def drone_start_recording(drone):
     drone(set_camera_mode(cam_id=0, value="recording"))

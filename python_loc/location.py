@@ -90,7 +90,7 @@ pid_components = namedtuple('pid_components', 'Kp Ki Kd')
 
 # Default PID config
 xy_pid_comp  = pid_components(Kp=50,  Ki=0, Kd=100)
-yaw_pid_comp = pid_components(Kp=200, Ki=0, Kd=100)
+yaw_pid_comp = pid_components(Kp=120, Ki=0, Kd=40)
 pid_limits   = (-100, 100)
 
 DWM_DATA_SOURCE = dwm_source.BLE
