@@ -292,26 +292,29 @@ def draw_3dscene(ax, X, Y, Z, true_X, true_Y, true_Z, parrot_alt, ts, anch_cnt):
     # WTF?
     plt.pause(0.000001)
 
-def recv_math_output(sock):
+def recv_location(sock):
     # Wait for data
     select.select([sock], [], [], None)
-
-    fmt = "dffffffBffffffffffffffiiiHHHHffff"
-    sz = struct.calcsize(fmt)
 
     # Suck everything, drop all packets except the last one
     buf = None
     dropped = -1
     while True:
         try:
+            fmt = "dffffffBffffffffffffffiii"
+            sz = struct.calcsize(fmt)
+            buf = sock.recv(sz, socket.MSG_PEEK)
+            *data, nr_anchors = struct.unpack(fmt, buf)
+            fmt += 'H' * nr_anchors + 'f' * nr_anchors
+            sz = struct.calcsize(fmt)
             buf = sock.recv(sz)
+            data = struct.unpack(fmt, buf)
             dropped += 1
             continue
         except:
             # EAGAIN
             break
 
-    data = struct.unpack(fmt, buf)
     return *data, dropped
 
 if __name__ == '__main__':
@@ -360,8 +363,10 @@ if __name__ == '__main__':
          true_x, true_y, true_z, true_pos_valid,
          parrot_alt, rate, xKp, xKi, xKd, xp, xi, xd,
          yKp, yKi, yKd, yp, yi, yd, roll, pitch, nr_anchors,
-         addr1, addr2, addr3, addr4, dist1, dist2, dist3, dist4,
-         dropped) = recv_math_output(sock)
+         *addrs_and_dists, dropped) = recv_location(sock)
+
+        addrs = addrs_and_dists[:nr_anchors]
+        dists = addrs_and_dists[nr_anchors:]
 
         X.append(x)
         Y.append(y)
@@ -414,8 +419,7 @@ if __name__ == '__main__':
             pid_x_plot.update(ts, x, X_f1, X_f2, pid_x_text)
             pid_y_plot.update(ts, y, Y_f1, Y_f2, pid_y_text)
 
-            len_plot.update(ts, [addr1, addr2, addr3, addr4],
-                            [dist1, dist2, dist3, dist4])
+            len_plot.update(ts, addrs, dists)
 
         # Draw 3d scene
         if args['--plot3d']:

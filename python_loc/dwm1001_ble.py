@@ -34,6 +34,7 @@ class DWMDeviceManager(gatt.DeviceManager):
     devs_by_node_addr = {}
     predefined_anchors = {}
     eventfd_map = {}
+    inv_eventfd_map = {}
     lock = None
 
     def __init__(self, adapter_name='hci0', predefined_anchors={},
@@ -42,6 +43,8 @@ class DWMDeviceManager(gatt.DeviceManager):
         self.lock = threading.Lock()
         self.predefined_anchors = predefined_anchors
         self.eventfd_map = eventfd_map
+        # Invert map for efd search
+        self.inv_eventfd_map = {v:k for k,v in eventfd_map.items()}
         super(DWMDeviceManager, self).__init__(adapter_name=adapter_name)
 
     def start(self):
@@ -78,6 +81,12 @@ class DWMDeviceManager(gatt.DeviceManager):
         self.lock.release()
 
         return device
+
+    def find_device_by_efd(self, efd):
+        if efd not in self.inv_eventfd_map:
+            return None
+        addr = self.inv_eventfd_map[efd]
+        return self.find_device_by_node_addr(addr)
 
     def disconnect_devices(self):
         for device in self.devs_by_mac_addr.values():
@@ -324,15 +333,16 @@ class DWMDevice(gatt.Device):
                 self.eventfd.set()
                 self.lock.release()
 
+
 help = \
 """DWM1001 BLE
 
 Usage:
-  dwm1001_ble.py --tag-addr <addr> [--stream-to-sock]
+  dwm1001_ble.py --tag-addr <addr>... [--stream-to-sock]
 
 Options:
   -h --help              Show this screen
-  --tag-addr <addr>      Tag node address in hex
+  --tag-addr <addr>...   Tag node address in hex
   --stream-to-sock       Stream DWM location to sock
 """
 
@@ -361,42 +371,48 @@ if __name__ == '__main__':
     args = docopt(help)
     signal.signal(signal.SIGINT, signal_handler)
 
-    tag_addr = int(args['--tag-addr'], base=16)
+    tag_addrs = [int(tag_addr, base=16) for tag_addr in args['--tag-addr']]
     tag = None
     ts = time.time()
 
+    eventfd_map = {addr: eventfd.EventFD() for addr in tag_addrs}
     manager = DWMDeviceManager(adapter_name='hci0',
                                predefined_anchors=cfg.ANCHORS,
-                               eventfd_map={tag_addr: efd})
+                               eventfd_map=eventfd_map)
     manager.start()
 
     if args['--stream-to-sock']:
         dwm_sock = create_dwm_sock()
 
+    efds = eventfd_map.values()
+
     while not should_stop:
-        r, w, e = select.select([efd], [], [])
+        r, w, e = select.select(efds, [], [])
         if should_stop:
             break
 
-        tag = manager.find_device_by_node_addr(tag_addr)
-        if not tag:
-            print("Error: can't find tag by addr 0x%x, stopping everything" % tag_addr)
-            break
+        for efd in r:
+            tag = manager.find_device_by_efd(efd)
+            if not tag:
+                print("Error: can't find tag, stopping everything")
+                should_stop = True
+                break
 
-        now = time.time()
-        rate = 1 / (now - ts)
-        ts = now
-        loc = tag.get_location()
+            now = time.time()
+            rate = 1 / (now - ts)
+            ts = now
+            loc = tag.get_location()
 
-        if args['--stream-to-sock']:
-            # We pass through sock integers, not floats
-            coords_and_dist_to_mm(loc)
-            send_dwm_data(dwm_sock, loc)
+            if args['--stream-to-sock']:
+                # We pass through sock integers, not floats
+                coords_and_dist_to_mm(loc)
+                send_dwm_data(dwm_sock, loc)
 
-        print("XYZ = (%.2fm %.2fm %.2fm) %3.0fHz" % \
-              (loc['pos']['coords'][0],
-               loc['pos']['coords'][1],
-               loc['pos']['coords'][2],
-               rate))
+            print("[%04x] XYZ = (%.2fm %.2fm %.2fm) %3.0fHz" % \
+                  (tag.node_addr,
+                   loc['pos']['coords'][0],
+                   loc['pos']['coords'][1],
+                   loc['pos']['coords'][2],
+                   rate))
 
     manager.stop()

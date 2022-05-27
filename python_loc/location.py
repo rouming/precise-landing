@@ -37,7 +37,7 @@ from scipy.optimize import minimize
 from simple_pid import PID
 import config as cfg
 
-dwm_fd      = None
+dwm_fds     = None
 nano33_fd   = None
 parrot_sock = None
 
@@ -264,19 +264,18 @@ def create_dwm_sock():
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     sock.setblocking(0)
 
-    return sock
+    return [sock]
 
 def create_dwm_ble():
     global dwm_manager
 
-    efd = eventfd.EventFD()
-    eventfd_map = {cfg.TAG_ADDR: efd}
+    eventfd_map = {addr: eventfd.EventFD() for addr in cfg.TAG_ADDRS}
     dwm_manager = dwm1001_ble.DWMDeviceManager(adapter_name='hci0',
                                                predefined_anchors=cfg.ANCHORS,
                                                eventfd_map=eventfd_map)
     dwm_manager.start()
 
-    return efd
+    return eventfd_map.values()
 
 def destroy_dwm_ble():
     if dwm_manager:
@@ -305,12 +304,12 @@ def destroy_nano33_ble():
     if nano33_manager:
         nano33_manager.stop()
 
-def create_dwm_fd():
+def create_dwm_fds():
     if DWM_DATA_SOURCE == dwm_source.SOCK:
         return create_dwm_sock()
     return create_dwm_ble()
 
-def destroy_dwm_fd():
+def destroy_dwm_fds():
     if DWM_DATA_SOURCE == dwm_source.BLE:
         destroy_dwm_ble()
 
@@ -328,12 +327,13 @@ def create_plot_sock():
 
     return sock
 
-def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator, loc):
+def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, navigator, loc):
     x_pid = navigator.x_pid
     y_pid = navigator.y_pid
 
-    addrs = [0x0000] * 4
-    dists = [-1.0] * 4
+    nr_anchors = len(loc['anchors'])
+    addrs = [0x0000] * nr_anchors
+    dists = [-1.0] * nr_anchors
 
     i = 0
     for anch in loc["anchors"]:
@@ -344,7 +344,8 @@ def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator, l
         dists[i] = dist
         i += 1
 
-    buf = struct.pack("dffffffBffffffffffffffiiiHHHHffff",
+    buf = struct.pack("dffffffBffffffffffffffiii" +
+                      'H' * nr_anchors + 'f' * nr_anchors,
                       ts,
                       x, y, z,
                       *loc['pos']['coords'], loc['pos']['valid'],
@@ -354,8 +355,7 @@ def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, nr_anchors, navigator, l
                       y_pid.Kp, y_pid.Ki, y_pid.Kd,
                       y_pid.components[0], y_pid.components[1], y_pid.components[2],
                       navigator.roll, navigator.pitch, nr_anchors,
-                      addrs[0], addrs[1], addrs[2], addrs[3],
-                      dists[0], dists[1], dists[2], dists[3])
+                      *addrs, *dists)
     sock.sendto(buf, (cfg.UDP_PLOT_IP, cfg.UDP_PLOT_PORT))
 
 
@@ -416,12 +416,12 @@ def receive_dwm_location(dwm_fd):
     if DWM_DATA_SOURCE == dwm_source.SOCK:
         return receive_dwm_location_from_sock(dwm_fd)
 
-    loc = {}
-    tag = dwm_manager.find_device_by_node_addr(cfg.TAG_ADDR)
+    loc = None
+    tag = dwm_manager.find_device_by_efd(dwm_fd)
     if tag:
         loc = tag.get_location()
     else:
-        print("Error: can't find tag by addr 0x%x" % cfg.TAG_ADDR)
+        print("Error: can't find tag")
 
     return loc
 
@@ -550,19 +550,37 @@ def print_location(loc):
         i += 1
     print('')
 
+def blend_dwm_locations(locs):
+    if len(locs) == 0:
+        return None
+
+    loc = None
+    for l in locs:
+        if l['pos']['valid']:
+            print("Error: can't blend locations with pre-calculated positions")
+            return None
+
+        if loc is None:
+            loc = l
+            continue
+
+        loc['anchors'] += l['anchors']
+
+    return loc
+
 def get_dwm_location_or_parrot_data():
-    global dwm_fd, nano33_fd, parrot_sock
+    global dwm_fds, nano33_fd, parrot_sock
     global stop_efd
 
-    if dwm_fd is None:
-        dwm_fd = create_dwm_fd()
+    if dwm_fds is None:
+        dwm_fds = create_dwm_fds()
     if nano33_fd is None:
         nano33_fd = create_nano33_ble()
     if parrot_sock is None:
         parrot_sock = create_parrot_sock()
 
     received = False
-    dwm_loc     = None
+    dwm_locs    = {}
     parrot_data = None
     nano_data   = None
 
@@ -571,20 +589,25 @@ def get_dwm_location_or_parrot_data():
         # Wait infinitely if we don't have any data
         timeout = 0 if received else None
 
-        rd, wr, ex = select.select([dwm_fd, nano33_fd, parrot_sock, stop_efd],
+        rd, wr, ex = select.select([*dwm_fds, nano33_fd, parrot_sock, stop_efd],
                                    [], [], timeout)
         if 0 == len(rd):
             break
         if stop_efd in rd:
             break;
 
-        if dwm_fd in rd:
-            loc = receive_dwm_location(dwm_fd)
-            #print_location(loc)
+        for dwm_fd in dwm_fds:
+            if dwm_fd not in rd:
+                continue
 
+            loc = receive_dwm_location(dwm_fd)
+            if loc is None:
+                continue
+
+            #print_location(loc)
             if is_dwm_location_reliable(loc):
                 received = True
-                dwm_loc = loc
+                dwm_locs[dwm_fd] = loc
         if parrot_sock in rd:
             parrot_data = receive_parrot_data_from_sock(parrot_sock)
             if parrot_data is not None:
@@ -595,6 +618,9 @@ def get_dwm_location_or_parrot_data():
             nano_data["acc"] = acc # ax, ay, az, ts
             nano_data["attitude"] = attitude
             nano_data["ts"] = time.time()
+
+    # Blend dwm locations from multiple tags
+    dwm_loc = blend_dwm_locations(dwm_locs.values())
 
     return dwm_loc, parrot_data, nano_data
 
@@ -670,7 +696,7 @@ if __name__ == '__main__':
         ts = time.time()
 
         send_plot_data(plot_sock, x, y, z, parrot_alt, ts, rate,
-                       len(loc['anchors']), navigator, loc)
+                       navigator, loc)
 
-    destroy_dwm_fd()
+    destroy_dwm_fds()
     destroy_nano33_ble()

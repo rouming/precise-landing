@@ -38,7 +38,7 @@ if TESTING_STAND == 1:
     }
 
     # Tag
-    TAG_ADDR = None # XXX ???????
+    TAG_ADDRS = [None] # XXX ???????
 
     # Nano33Ble
     NANO33_MAC = "ed:26:b0:24:73:0c"
@@ -46,31 +46,26 @@ if TESTING_STAND == 1:
 elif TESTING_STAND == 2:
     # Anchors coords (should create a rectangle with clockwise coords)
     ANCHORS = {
-#        0x14d5: [0.000, 0.040, 0.000],
-#        0x14d9: [0.000, 0.300, 0.000],
-#        0x14ca: [0.040, 0.600, 0.005],
-#        0x1337: [0.295, 0.600, 0.005],
-#        0x0465: [0.605, 0.560, 0.000],
-#        0x14c6: [0.605, 0.300, 0.000],
-#        0x14c8: [0.570, 0.000, 0.005],
-#        0x11cf: [0.300, 0.000, 0.005],
-
+        # Network 0xaaac
+        # Tag 0x16e9
         0x14d5: [0.000, 0.000, 0.000],
         0x0465: [1.300, 0.000, 0.000],
         0x14c8: [1.300, 1.300, 0.000],
         0x14ca: [0.000, 1.300, 0.000],
 
+        # Network 0xa53e
+        # Tag 0x16fc
+        0x11cf: [0.650, 0.000, 0.000],
+        0x1337: [1.300, 0.650, 0.000],
+        0x14c6: [0.650, 1.300, 0.000],
+        0x14d9: [0.000, 0.650, 0.000],
     }
 
     #
     # Tags
     #
-
-    # First
-    TAG_ADDR = 0x16e9
-
-    # Second
-    #TAG_ADDR = 0x16fc
+    #TAG_ADDRS = [0x16e9, 0x16fc]
+    TAG_ADDRS = [0x16e9]
 
     #
     # Nano33BLE
