@@ -367,6 +367,10 @@ class SockCtrl():
     def get_piloting_cmd(self):
         return self._cmds.pop(0)
 
+    def drop_piloting_cmds(self):
+        self._cmds = []
+
+
 if __name__ == "__main__":
     # Reduce log level
     olympe.log.update_config({"loggers": {"olympe": {"level": "WARNING"}}})
@@ -396,14 +400,15 @@ if __name__ == "__main__":
 
             if kb_ctrl.has_piloting_cmd():
                 drone(kb_ctrl.get_piloting_cmd())
-            elif sock_ctrl.has_piloting_cmd():
+            elif sock_ctrl.has_piloting_cmd() and not other_input_blocked:
                 cmd = sock_ctrl.get_piloting_cmd()
-                if not other_input_blocked:
-                    drone(cmd)
-                    if is_drone_cmd_land(cmd):
-                        # Block other input after landing
-                        kb_ctrl.block_other_input()
+                drone(cmd)
+                if is_drone_cmd_land(cmd):
+                    # Block other input after landing
+                    kb_ctrl.block_other_input()
             elif other_input_blocked:
+                # Drop the whole queue
+                sock_ctrl.drop_piloting_cmds()
                 # We send STOP cmd only if no other input
                 drone(PCMD(0, 0, 0, 0, 0, timestampAndSeqNum=0))
 
