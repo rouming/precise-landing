@@ -698,7 +698,7 @@ if __name__ == '__main__':
     plot_sock = create_plot_sock()
 
     navigator.start()
-    droneloc = drone_localization(post_smoother=post_smoother)
+    droneloc = drone_localization(cfg.KALMAN_TYPE, post_smoother=post_smoother)
 
     signal.signal(signal.SIGINT, sigint_handler)
 
