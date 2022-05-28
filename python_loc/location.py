@@ -22,6 +22,7 @@ import os
 import re
 import sys
 import signal
+import threading
 from collections import namedtuple
 
 import filterpy.kalman
@@ -50,6 +51,7 @@ last_loc_update_nr = 0
 should_stop = False
 stop_efd    = eventfd.EventFD()
 
+MAX_PID_RATE_HZ       = 10
 MAX_PID_DT            = 1
 LANDING_ALT           = 0.5
 LANDING_SETTLING_SECS = 1
@@ -111,8 +113,11 @@ def rotate_vec_on_xy_angle(vec, xy_angle):
                     [               0,                 0,  1]])
     return np.dot(rot, np.array(vec))
 
-class drone_navigator():
+class drone_navigator(threading.Thread):
     in_yaw = None
+    in_pos = None
+    lock = threading.Lock()
+    pid_efd = eventfd.EventFD()
 
     # Target coords and angle
     target_x = 0
@@ -124,7 +129,7 @@ class drone_navigator():
     roll = 0
 
     ready_to_land_ts = None
-    last_navigate_ts = None
+    last_navigate_ts = 0
     last_yaw_ts      = None
 
     def __init__(self, target_x, target_y, target_yaw):
@@ -164,23 +169,26 @@ class drone_navigator():
         self.sock.sendto(buf, (cfg.UDP_COMMANDS_IP, cfg.UDP_COMMANDS_PORT))
 
     def set_yaw_angle(self, yaw):
+        self.lock.acquire()
         self.in_yaw = yaw
         self.last_yaw_ts = time.time()
+        self.lock.release()
 
-    def navigate_drone(self, x, y, z):
-        in_pos = (x, y, z)
+    def is_yaw_reliable(self):
+        return self.in_yaw is not None and \
+            time.time() - self.last_yaw_ts < YAW_OUTDATED_SECS
 
-        if self.in_yaw is None:
-            return
+    def set_pos(self, x, y, z):
+        self.lock.acquire()
+        self.in_pos = (x, y, z)
+        if self.is_yaw_reliable():
+            self.pid_efd.set()
+        self.lock.release()
 
+    def navigate_drone(self, in_pos, in_yaw):
         now = time.time()
 
-        if now - self.last_yaw_ts > YAW_OUTDATED_SECS:
-            print("!!! Warning: yaw angle is outdated, ignore navigation cycle")
-            return
-
-        if self.last_navigate_ts is not None and \
-           now - self.last_navigate_ts >= MAX_PID_DT:
+        if now - self.last_navigate_ts >= MAX_PID_DT:
             # Data got stuck, we can't rely on the internal PID state
             # any more, so do reset
             self.yaw_pid.reset()
@@ -190,14 +198,14 @@ class drone_navigator():
         self.last_navigate_ts = now
 
         # Drone orientation PID control
-        control_yaw = self.yaw_pid(self.in_yaw)
+        control_yaw = self.yaw_pid(in_yaw)
 
         control_x   = 0
         control_y   = 0
         control_thr = 0
 
         # Drone yaw angle relative to the landing area
-        yaw_angle = self.in_yaw - self.target_yaw
+        yaw_angle = in_yaw - self.target_yaw
 
         # Target position in the drone frame
         target_pos = np.array([self.target_x, self.target_y, 0]) - np.array(in_pos)
@@ -237,7 +245,7 @@ class drone_navigator():
 
         print("PID CONTROL X=%4d Y=%4d YAW=%4d, DP=(%.2f %.2f %.2f) YAW=(%.1f°) %s" %
               (int(control_x), int(control_y), int(control_yaw),
-               drone_pos[0], drone_pos[1], drone_pos[2], np.rad2deg(self.in_yaw),
+               drone_pos[0], drone_pos[1], drone_pos[2], np.rad2deg(in_yaw),
                '| LAND' if control_thr < -100  else \
                '| DESC' if control_thr else ''
             ))
@@ -252,6 +260,44 @@ class drone_navigator():
 
         self.roll = roll
         self.pitch = pitch
+
+    def calculate_timeout(self):
+        global should_stop, stop_efd
+        now = time.time()
+        period = 1.0 / MAX_PID_RATE_HZ
+        dt = now - self.last_navigate_ts
+        if dt > period:
+            # For the first time or when out of the schedule
+            timeout = None
+            fds = [self.pid_efd, stop_efd]
+        else:
+            # Keep PID rate by calculating timeout
+            timeout = period - dt
+            fds = [stop_efd]
+
+        return fds, timeout
+
+    def run(self):
+        # PID loop with certain rate
+        while True:
+            global should_stop
+            fds, timeout = self.calculate_timeout()
+            r, w, e = select.select(fds, [], [], timeout)
+            if should_stop:
+                break
+            if not self.pid_efd.is_set():
+                continue
+
+            # Get position and yaw under the lock
+            self.lock.acquire()
+            in_pos = self.in_pos
+            in_yaw = self.in_yaw
+            self.pid_efd.clear()
+            self.lock.release()
+
+            # PID navigation
+            self.navigate_drone(in_pos, in_yaw)
+
 
 def create_dwm_sock():
     # Create sock and bind
@@ -651,6 +697,7 @@ if __name__ == '__main__':
     navigator = drone_navigator(cfg.LANDING_X, cfg.LANDING_Y, cfg.LANDING_ANGLE)
     plot_sock = create_plot_sock()
 
+    navigator.start()
     droneloc = drone_localization(post_smoother=post_smoother)
 
     signal.signal(signal.SIGINT, sigint_handler)
@@ -689,8 +736,8 @@ if __name__ == '__main__':
         # Invoke distance localization
         x, y, z = droneloc.kf_process_dist(loc)
 
-        # PID control
-        navigator.navigate_drone(x, y, z)
+        # Set estimated position
+        navigator.set_pos(x, y, z)
 
         # Send all math output to the plot
         ts = time.time()
