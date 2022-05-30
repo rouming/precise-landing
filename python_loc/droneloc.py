@@ -291,8 +291,8 @@ class drone_localization():
         elif self.kf_type == kalman_type.EKF6:
             self.kf.Q = Q_6(dt)
             self.kf.F = ekf_F_6(dt)
-            self.kf.predict()
-            self.kf.update(z, R=R, HJacobian=HJacobian_6_dist, Hx=Hx_6_dist, args=loc, hx_args=loc)
+            self.kf.R = R
+            self.kf.predict_update(z, HJacobian=HJacobian_6_dist, Hx=Hx_6_dist, args=loc, hx_args=loc)
         else:
             raise ValueError("incorrect kalman filter type %d." % self.kf_type)
 
@@ -323,8 +323,8 @@ class drone_localization():
         elif self.kf_type == kalman_type.EKF6:
             self.kf.Q = Q_6(dt)
             self.kf.F = ekf_F_6(dt)
-            self.kf.predict()
-            self.kf.update(z, R=R, HJacobian=HJacobian_6_alt, Hx=Hx_6_alt, args=loc)
+            self.kf.R = R
+            self.kf.predict_update(z, HJacobian=HJacobian_6_alt, Hx=Hx_6_alt, args=loc)
         else:
             raise ValueError("incorrect kalman filter type %d." % self.kf_type)
 
@@ -357,8 +357,8 @@ class drone_localization():
         elif self.kf_type == kalman_type.EKF6:
             self.kf.Q = Q_6(dt)
             self.kf.F = ekf_F_6(dt)
-            self.kf.predict()
-            self.kf.update(z, R=R, HJacobian=HJacobian_6_vel, Hx=Hx_6_vel, args=loc)
+            self.kf.R = R
+            self.kf.predict_update(z, HJacobian=HJacobian_6_vel, Hx=Hx_6_vel, args=loc)
         else:
             raise ValueError("incorrect kalman filter type %d." % self.kf_type)
 
