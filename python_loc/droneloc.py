@@ -15,8 +15,8 @@ Options:
                              e.g. standard deviation of real a DWM1001 device can vary
                              from 20mm to 200mm.
   --seed <seed>              Seed value for the random generator. 0 is the default value.
-  --kf-type <type>           Kalman filter type. can be: "ekf" for Extended Kalman filter, "ukf" for Unscented Kalman
-                             filter.
+  --kf-type <type>           Kalman filter type. can be: "ekf6" or "ekf9 for Extended Kalman filter,
+                             "ukf6" or "ukf9 for Unscented Kalman filter.
 
 """
 
@@ -41,8 +41,10 @@ class smoother_type(enum.Enum):
     GAUSSIAN = 2
 
 class kalman_type(enum.Enum):
-    EKF6   = 0
-    UKF6   = 1
+    UKF6   = 0
+    EKF6   = 1
+    UKF9   = 2
+    EKF9   = 3
 
 sigma_accel = 0.3
 sigma_dist = 0.2
@@ -88,18 +90,7 @@ anchors = [
 #       A - acceleration
 #
 
-def ukf_F_6(x, dt):
-    F = np.array([[1, dt,  0,  0,  0, 0],
-                  [0,  1,  0,  0,  0, 0],
-                  [0,  0,  1, dt,  0, 0],
-                  [0,  0,  0,  1,  0, 0],
-                  [0,  0,  0,  0,  1, dt],
-                  [0,  0,  0,  0,  0, 1]
-                  ])
-    return F @ x
-
-
-def ekf_F_6(dt):
+def F_6(dt):
     F = np.array([[1, dt,  0,  0,  0, 0],
                   [0,  1,  0,  0,  0, 0],
                   [0,  0,  1, dt,  0, 0],
@@ -109,12 +100,43 @@ def ekf_F_6(dt):
                   ])
     return F
 
+def ukf_F_6(x, dt):
+    return F_6(dt) @ x
+
+
+def F_9(dt):
+    f = np.array([[1, dt, dt**2 / 2.0],
+                 [0, 1, dt],
+                 [0, 0, 1]])
+
+    # block diag transition matrix
+    F = block_diag(f, f, f)
+    return F
+
+
+def ukf_F_9(x, dt):
+    return F_9(dt) @ x
+
 
 def Q_6(dt):
     #Q = filterpy.common.Q_discrete_white_noise(dim=2, dt=dt, var=sigma_accel**2, block_size=3)
     q = np.array([[dt**4 / 4, dt**3 / 2],
                   [dt**3 / 2, dt**2]])
     # Take damping into considiration on Z axis
+    qz = q * z_damping_factor
+    Q = block_diag(q, q, qz)
+    Q *= sigma_accel**2
+    Q *= Q_scale
+
+    return Q
+
+
+def Q_9(dt):
+    #Q = filterpy.common.Q_discrete_white_noise(dim=2, dt=dt, var=sigma_accel**2, block_size=3)
+    q = np.array([[dt**4 / 4, dt**3 / 2, dt**2 / 2],
+                  [dt**3 / 2, dt**2, dt],
+                  [dt**2 / 2, dt, 1]])
+    # Take damping into consideration on Z axis
     qz = q * z_damping_factor
     Q = block_diag(q, q, qz)
     Q *= sigma_accel**2
@@ -160,17 +182,41 @@ def HJacobian_6_dist(x, loc):
     return H
 
 
-def HJacobian_6_vel(x, loc):
-    # X_6 = [Px, Vx, Py, Vy, Pz, Vz]
-    return np.array([[0, 1, 0, 0, 0, 0],
-                     [0, 0, 0, 1, 0, 0],
-                     [0, 0, 0, 0, 0, 1]])
+def Hx_9_dist(x, loc):
+    """ takes a state X and returns the measurement that would
+    correspond to that state.
+    """
+
+    r_pred = []
+    for anchor in loc['anchors']:
+        coords = anchor["pos"]["coords"]
+        anch_x = coords[0]
+        anch_y = coords[1]
+        anch_z = coords[2]
+
+        anch = np.array([anch_x, anch_y, anch_z])
+        pos = np.array([x[0], x[3], x[6]])
+        r = np.linalg.norm(pos - anch) + 1e-6
+        r_pred.append(r)
+
+    return np.array(r_pred)
 
 
-def HJacobian_6_alt(x, loc):
-    # X_6 = [Px, Vx, Py, Vy, Pz, Vz]
-    # Altitude, or Z coordinate
-    return np.array([0, 0, 0, 0, 1, 0]).reshape(1, 6)
+def HJacobian_9_dist(x, loc):
+    H = np.empty([0, 9])
+    for anchor in loc['anchors']:
+        coords = anchor["pos"]["coords"]
+        anch_x = coords[0]
+        anch_y = coords[1]
+        anch_z = coords[2]
+
+        anch = np.array([anch_x, 0, 0, anch_y, 0, 0, anch_z, 0, 0])
+        pos = np.array([x[0], 0, 0, x[3], 0, 0, x[6], 0, 0])
+        r = np.linalg.norm(pos - anch) + 1e-6
+        h_row = (pos - anch) / r
+        H = np.append(H, [h_row], axis=0)
+
+    return H
 
 
 def Hx_6_alt(x):
@@ -182,6 +228,27 @@ def Hx_6_alt(x):
     return np.array([x[4]])
 
 
+def HJacobian_6_alt(x):
+    # X_6 = [Px, Vx, Py, Vy, Pz, Vz]
+    # Altitude, or Z coordinate
+    return np.array([0, 0, 0, 0, 1, 0]).reshape(1, 6)
+
+
+def Hx_9_alt(x):
+    """ takes a state X and returns the measurement that would
+    correspond to that state.
+    """
+
+    # Altitude, or Z coordinate
+    return np.array([x[6]])
+
+
+def HJacobian_9_alt(x):
+    # X_6 = [Px, Vx, Py, Vy, Pz, Vz]
+    # Altitude, or Z coordinate
+    return np.array([0, 0, 0, 0, 0, 0, 1, 0, 0]).reshape(1, 9)
+
+
 def Hx_6_vel(x):
     """ takes a state X and returns the measurement that would
     correspond to that state.
@@ -189,6 +256,29 @@ def Hx_6_vel(x):
 
     # X_6 = [Px, Vx, Py, Vy, Pz, Vz]
     return np.array([x[1], x[3], x[5]])
+
+
+def HJacobian_6_vel(x):
+    # X_6 = [Px, Vx, Py, Vy, Pz, Vz]
+    return np.array([[0, 1, 0, 0, 0, 0],
+                     [0, 0, 0, 1, 0, 0],
+                     [0, 0, 0, 0, 0, 1]])
+
+
+def Hx_9_vel(x):
+    """ takes a state X and returns the measurement that would
+    correspond to that state.
+    """
+
+    # X_6 = [Px, Vx, Py, Vy, Pz, Vz]
+    return np.array([x[1], x[4], x[7]])
+
+
+def HJacobian_9_vel(x):
+    # X_9 = [Px, Vx, Ax, Py, Vy, Ay, Pz, Vz, Az]
+    return np.array([[0, 1, 0, 0, 0, 0, 0, 0, 0],
+                     [0, 0, 0, 0, 1, 0, 0, 0, 0],
+                     [0, 0, 0, 0, 0, 0, 0, 1, 0]])
 
 
 def get_measurements_dist(loc):
@@ -221,12 +311,21 @@ class drone_localization():
             points = filterpy.kalman.MerweScaledSigmaPoints(n=6, alpha=.1, beta=2, kappa=0)
             kf = filterpy.kalman.UnscentedKalmanFilter(dim_x=6, dim_z=4, fx=ukf_F_6, hx=Hx_6_dist,
                                                        dt=dt, points=points)
+        elif kf_type == kalman_type.UKF9:
+            points = filterpy.kalman.MerweScaledSigmaPoints(n=9, alpha=.1, beta=2, kappa=0)
+            kf = filterpy.kalman.UnscentedKalmanFilter(dim_x=9, dim_z=4, fx=ukf_F_9, hx=Hx_9_dist,
+                                                       dt=dt, points=points)
         elif kf_type == kalman_type.EKF6:
             kf = filterpy.kalman.ExtendedKalmanFilter(dim_x=6, dim_z=4)
+        elif kf_type == kalman_type.EKF9:
+            kf = filterpy.kalman.ExtendedKalmanFilter(dim_x=9, dim_z=4)
         else:
             raise ValueError("incorrect kalman filter type %d." % kf_type)
 
-        kf.x = np.array([1, 0, 1, 0, 1, 0])
+        if kf_type == kalman_type.UKF6 or kf_type == kalman_type.EKF6:
+            kf.x = np.array([1, 0, 1, 0, 1, 0])
+        if kf_type == kalman_type.UKF9 or kf_type == kalman_type.EKF9:
+            kf.x = np.array([1, 0, 0, 1, 0, 0, 1, 0, 0])
 
         self.kf = kf
         self.kf_type = kf_type
@@ -273,7 +372,32 @@ class drone_localization():
 
 
     def is_z_coord_negative(self):
-        return self.kf.x[4] < 0
+        if self.kf_type == kalman_type.EKF6 or self.kf_type == kalman_type.UKF6:
+            return self.kf.x[4] < 0
+        if self.kf_type == kalman_type.EKF9 or self.kf_type == kalman_type.UKF9:
+            return self.kf.x[6] < 0
+
+
+    def get_position(self):
+        x = self.kf.x
+        if self.kf_type == kalman_type.EKF6 or self.kf_type == kalman_type.UKF6:
+            return np.array([x[0], x[2], x[4]])
+        if self.kf_type == kalman_type.EKF9 or self.kf_type == kalman_type.UKF9:
+            return np.array([x[0], x[3], x[6]])
+
+
+    def get_pos_cov(self):
+        if self.kf_type == kalman_type.EKF6 or self.kf_type == kalman_type.UKF6:
+            return self.kf.P[0:5:2, 0:5:2]
+        if self.kf_type == kalman_type.EKF9 or self.kf_type == kalman_type.UKF9:
+            return self.kf.P[0:8:3, 0:8:3]
+
+
+    def get_pos_cov_XY(self):
+        if self.kf_type == kalman_type.EKF6 or self.kf_type == kalman_type.UKF6:
+            return self.kf.P[0:3:2, 0:3:2]
+        if self.kf_type == kalman_type.EKF9 or self.kf_type == kalman_type.UKF9:
+            return self.kf.P[0:5:3, 0:5:3]
 
 
     def kf_process_dist(self, loc):
@@ -288,11 +412,20 @@ class drone_localization():
             self.kf.Q = Q_6(dt)
             self.kf.predict(dt=dt)
             self.kf.update(z, R=R, hx=Hx_6_dist, loc=loc)
+        elif self.kf_type == kalman_type.UKF9:
+            self.kf.Q = Q_9(dt)
+            self.kf.predict(dt=dt)
+            self.kf.update(z, R=R, hx=Hx_9_dist, loc=loc)
         elif self.kf_type == kalman_type.EKF6:
-            self.kf.Q = Q_6(dt)
-            self.kf.F = ekf_F_6(dt)
             self.kf.R = R
+            self.kf.Q = Q_6(dt)
+            self.kf.F = F_6(dt)
             self.kf.predict_update(z, HJacobian=HJacobian_6_dist, Hx=Hx_6_dist, args=loc, hx_args=loc)
+        elif self.kf_type == kalman_type.EKF9:
+            self.kf.R = R
+            self.kf.Q = Q_9(dt)
+            self.kf.F = F_9(dt)
+            self.kf.predict_update(z, HJacobian=HJacobian_9_dist, Hx=Hx_9_dist, args=loc, hx_args=loc)
         else:
             raise ValueError("incorrect kalman filter type %d." % self.kf_type)
 
@@ -304,8 +437,8 @@ class drone_localization():
             self.kf.x = old_x
             self.kf.P = old_P
 
-        # Smooth calculated position, i.e. Px=[0], Py=[2], Pz=[4]
-        return self.post_smooth(self.kf.x[0:6:2])
+        # Smooth calculated position
+        return self.post_smooth(self.get_position())
 
 
     def kf_process_alt(self, alt):
@@ -320,11 +453,20 @@ class drone_localization():
             self.kf.Q = Q_6(dt)
             self.kf.predict(dt=dt)
             self.kf.update(z, R=R, hx=Hx_6_alt)
+        elif self.kf_type == kalman_type.UKF9:
+            self.kf.Q = Q_9(dt)
+            self.kf.predict(dt=dt)
+            self.kf.update(z, R=R, hx=Hx_9_alt)
         elif self.kf_type == kalman_type.EKF6:
-            self.kf.Q = Q_6(dt)
-            self.kf.F = ekf_F_6(dt)
             self.kf.R = R
-            self.kf.predict_update(z, HJacobian=HJacobian_6_alt, Hx=Hx_6_alt, args=loc)
+            self.kf.Q = Q_6(dt)
+            self.kf.F = F_6(dt)
+            self.kf.predict_update(z, HJacobian=HJacobian_6_alt, Hx=Hx_6_alt)
+        elif self.kf_type == kalman_type.EKF9:
+            self.kf.R = R
+            self.kf.Q = Q_9(dt)
+            self.kf.F = F_9(dt)
+            self.kf.predict_update(z, HJacobian=HJacobian_9_alt, Hx=Hx_9_alt)
         else:
             raise ValueError("incorrect kalman filter type %d." % self.kf_type)
 
@@ -338,8 +480,8 @@ class drone_localization():
             self.kf.x = old_x
             self.kf.P = old_P
 
-        # Smooth calculated position, i.e. Px=[0], Py=[2], Pz=[4]
-        return self.post_smooth(self.kf.x[0:6:2])
+        # Smooth calculated position
+        return self.post_smooth(self.get_position())
 
 
     def kf_process_vel(self, vel):
@@ -354,11 +496,20 @@ class drone_localization():
             self.kf.Q = Q_6(dt)
             self.kf.predict(dt=dt)
             self.kf.update(z, R=R, hx=Hx_6_vel)
+        elif self.kf_type == kalman_type.UKF9:
+            self.kf.Q = Q_9(dt)
+            self.kf.predict(dt=dt)
+            self.kf.update(z, R=R, hx=Hx_9_vel)
         elif self.kf_type == kalman_type.EKF6:
-            self.kf.Q = Q_6(dt)
-            self.kf.F = ekf_F_6(dt)
             self.kf.R = R
-            self.kf.predict_update(z, HJacobian=HJacobian_6_vel, Hx=Hx_6_vel, args=loc)
+            self.kf.Q = Q_6(dt)
+            self.kf.F = F_6(dt)
+            self.kf.predict_update(z, HJacobian=HJacobian_6_vel, Hx=Hx_6_vel)
+        elif self.kf_type == kalman_type.EKF9:
+            self.kf.R = R
+            self.kf.Q = Q_9(dt)
+            self.kf.F = F_9(dt)
+            self.kf.predict_update(z, HJacobian=HJacobian_9_vel, Hx=Hx_9_vel)
         else:
             raise ValueError("incorrect kalman filter type %d." % self.kf_type)
 
@@ -373,7 +524,7 @@ class drone_localization():
             self.kf.P = old_P
 
         # Smooth calculated position, i.e. Px=[0], Py=[2], Pz=[4]
-        return self.post_smooth(self.kf.x[0:6:2])
+        return self.post_smooth(self.get_position())
 
 
 def get_anchors_coords(anchors):
@@ -414,10 +565,14 @@ if __name__ == '__main__':
     if args['--noise-std']:
         noise_std = float(args['--noise-std'])
 
-    if args['--kf-type'] == 'ukf':
+    if args['--kf-type'] == 'ukf6':
         kf_type = kalman_type.UKF6
-    elif args['--kf-type'] == 'ekf':
+    elif args['--kf-type'] == 'ekf6':
         kf_type = kalman_type.EKF6
+    elif args['--kf-type'] == 'ukf9':
+        kf_type = kalman_type.UKF9
+    elif args['--kf-type'] == 'ekf9':
+        kf_type = kalman_type.EKF9
     else:
         kf_type = kalman_type.UKF6
 
@@ -496,7 +651,7 @@ if __name__ == '__main__':
         # Normalized Estimated Error Squared of the position
         x = np.array(true_coords)
         x_est = np.array(coords)
-        neeses.append(NEES(x, x_est, droneloc.kf.P[0:6:2, 0:6:2]))
+        neeses.append(NEES(x, x_est, droneloc.get_pos_cov()))
 
         # Plot true drone position
         plt.plot(true_coords[0], true_coords[1], ',', color='g')
@@ -507,7 +662,7 @@ if __name__ == '__main__':
         if n % 100 == 0:
             # Extract X (Px, Py) and P (Px, Py)
             plot_covariance((coords[0], coords[1]),
-                            droneloc.kf.P[0:3:2, 0:3:2],
+                            droneloc.get_pos_cov_XY(),
                             std=10, facecolor='g', alpha=0.3)
         n += 1
 
