@@ -108,6 +108,12 @@ class DWMDeviceManager(gatt.DeviceManager):
             # So check every discovered device
             if DWM_SERVICE_UUID not in service_data:
                 return
+
+            addr = device.name_to_dwm_addr()
+            if addr not in self.eventfd_map:
+                # We connect only to DWM tags
+                return
+
             device.connect()
             self.devs_by_mac_addr[device.mac_address] = device
             print("[%s] %s discovered" % (device.mac_address, device.alias()))
@@ -124,6 +130,10 @@ class DWMDevice(gatt.Device):
         self.lock = threading.Lock()
         self.eventfd = eventfd.EventFD()
         super(DWMDevice, self).__init__(mac_address=mac_address, manager=manager)
+
+    def name_to_dwm_addr(self):
+        dev_alias = self.alias()
+        return int(dev_alias.replace('DW', ''), 16)
 
     def disconnect_succeeded(self):
         super().disconnect_succeeded()
@@ -163,7 +173,7 @@ class DWMDevice(gatt.Device):
 
         location_data = location_data_characteristic.read_value()
         location = self._decode_location_data(location_data)
-        if self.is_anchor:
+        if not self.is_anchor:
             self.location = location
 
         # Enable notifications for location data
