@@ -40,13 +40,16 @@ class smoother_type(enum.Enum):
     UNIFORM  = 1
     GAUSSIAN = 2
 
-sigma_accel = 0.1
+sigma_accel = 0.3
 sigma_dist = 0.2
 # Values taken from hovering drone
 #sigma_vel = 0.01
 #sigma_alt = 0.005
 sigma_vel = 0.05
 sigma_alt = 0.02
+
+# Gate limit in standard deviations
+GATE_LIMIT = 6
 
 R_scale = 1
 Q_scale = 1
@@ -216,6 +219,10 @@ class drone_localization():
         return pos_f[-1]
 
 
+    def is_z_coord_negative(self):
+        return self.kf.x[4] < 0
+
+
     def kf_process_dist(self, loc):
         old_x = self.kf.x
         old_P = self.kf.P
@@ -229,8 +236,11 @@ class drone_localization():
         z = get_measurements_dist(loc)
         self.kf.update(z, R=R, hx=Hx_6_dist, loc=loc)
 
-        if np.any(np.abs(self.kf.y) > 2):
-            print("innovation DIST is too large: ", self.kf.y)
+        dist = self.kf.mahalanobis
+
+        if self.is_z_coord_negative() or dist > GATE_LIMIT:
+            if dist > GATE_LIMIT:
+                print("Warning: innovation DIST is too large: ", self.kf.y)
             self.kf.x = old_x
             self.kf.P = old_P
 
@@ -251,10 +261,13 @@ class drone_localization():
         z = get_measurements_alt(alt)
         self.kf.update(z, R=R, hx=Hx_6_alt)
 
-        if np.any(np.abs(self.kf.y) > 2):
-            print("innovation ALT is too large: ", self.kf.y)
-            print("Z alt [%.3f]" % (z[0]))
-            print("X alt [%.3f]" % (self.kf.x[4]))
+        dist = self.kf.mahalanobis
+
+        if self.is_z_coord_negative() or dist > GATE_LIMIT:
+            if dist > GATE_LIMIT:
+                print("Warning: innovation ALT is too large: ", self.kf.y)
+                print("         Z alt [%.3f]" % (z[0]))
+                print("         X alt [%.3f]" % (self.kf.x[4]))
             self.kf.x = old_x
             self.kf.P = old_P
 
@@ -275,10 +288,13 @@ class drone_localization():
         z = get_measurements_vel(vel)
         self.kf.update(z, R=R, hx=Hx_6_vel)
 
-        if np.any(np.abs(self.kf.y) > 2):
-            print("innovation VEL is too large: ", self.kf.y)
-            print("Z vel [%.3f,%.3f,%.3f]" % (z[0], z[1], z[2]))
-            print("X vel [%.3f,%.3f,%.3f]" % (self.kf.x[1], self.kf.x[3], self.kf.x[5]))
+        dist = self.kf.mahalanobis
+
+        if self.is_z_coord_negative() or dist > GATE_LIMIT:
+            if dist > GATE_LIMIT:
+                print("Warning: innovation VEL is too large: ", self.kf.y)
+                print("         Z vel [%.3f,%.3f,%.3f]" % (z[0], z[1], z[2]))
+                print("         X vel [%.3f,%.3f,%.3f]" % (self.kf.x[1], self.kf.x[3], self.kf.x[5]))
             self.kf.x = old_x
             self.kf.P = old_P
 
