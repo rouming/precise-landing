@@ -23,10 +23,10 @@ from math import cos, sin, sqrt, atan2
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy import array, dot
-from numpy.linalg import pinv
+from numpy.linalg import pinv, inv
 from numpy.random import randn
 import random
-from filterpy.stats import plot_covariance_ellipse
+from filterpy.stats import plot_covariance
 from scipy.linalg import block_diag
 from scipy.ndimage import uniform_filter1d
 from scipy.ndimage import gaussian_filter1d
@@ -294,6 +294,12 @@ def get_anchors_coords(anchors):
     return np.array(coords)
 
 
+# Taken from https://nbviewer.org/github/rlabbe/Kalman-and-Bayesian-Filters-in-Python/blob/master/08-Designing-Kalman-Filters.ipynb
+def NEES(x, est, P):
+    err = x - est
+    return err.T @ inv(P) @ err
+
+
 if __name__ == '__main__':
     args = docopt(__doc__)
     data_file = open(args['--trajectory'], 'r')
@@ -324,6 +330,7 @@ if __name__ == '__main__':
     anchors_coords = get_anchors_coords(anchors)
     plt.scatter(anchors_coords[:, 0], anchors_coords[:, 1])
 
+    neeses = []
     n = 0
     prev_true_coords = None
     while True:
@@ -389,6 +396,11 @@ if __name__ == '__main__':
         if coords is None:
             continue
 
+        # Normalized Estimated Error Squared of the position
+        x = np.array(true_coords)
+        x_est = np.array(coords)
+        neeses.append(NEES(x, x_est, droneloc.kf.P[0:6:2, 0:6:2]))
+
         # Plot true drone position
         plt.plot(true_coords[0], true_coords[1], ',', color='g')
 
@@ -397,11 +409,22 @@ if __name__ == '__main__':
 
         if n % 100 == 0:
             # Extract X (Px, Py) and P (Px, Py)
-            plot_covariance_ellipse((coords[0], coords[1]),
-                                    droneloc.kf.P[0:3:2, 0:3:2],
-                                    std=10, facecolor='g', alpha=0.3)
+            plot_covariance((coords[0], coords[1]),
+                            droneloc.kf.P[0:3:2, 0:3:2],
+                            std=10, facecolor='g', alpha=0.3)
         n += 1
 
+
+    # Normalized Estimated Error Squared mean
+    nees_mean = np.mean(neeses)
+
+    print('mean NEES is: %.4f, ' % nees_mean, end='')
+
+    # Where 3 is a dimension of the position
+    if nees_mean < 3:
+        print('PASSED')
+    else:
+        print('FAILED')
 
     plt.axis('equal')
     plt.show()
