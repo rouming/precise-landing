@@ -122,7 +122,7 @@ def Hx_6_dist(x, loc):
         r = np.linalg.norm(pos - anch) + 1e-6
         r_pred.append(r)
 
-    return np.array(r_pred).T
+    return np.array(r_pred)
 
 
 def Hx_6_alt(x):
@@ -131,7 +131,7 @@ def Hx_6_alt(x):
     """
 
     # Altitude, or Z coordinate
-    return np.array([x[4]]).T
+    return np.array([x[4]])
 
 
 def Hx_6_vel(x):
@@ -140,7 +140,7 @@ def Hx_6_vel(x):
     """
 
     # X_6 = [Px, Vx, Py, Vy, Pz, Vz]
-    return np.array([x[1], x[3], x[5]]).T
+    return np.array([x[1], x[3], x[5]])
 
 
 def get_measurements_dist(loc):
@@ -149,15 +149,15 @@ def get_measurements_dist(loc):
         dist = anchor["dist"]["dist"]
         ranges.append(dist)
 
-    return np.array(ranges).T
+    return np.array(ranges)
 
 
 def get_measurements_alt(alt):
-    return np.array([alt['alt']]).T
+    return np.array([alt['alt']])
 
 
 def get_measurements_vel(vel):
-    return np.array(vel['vel']).T
+    return np.array(vel['vel'])
 
 
 class drone_localization():
@@ -172,11 +172,6 @@ class drone_localization():
         kf = filterpy.kalman.UnscentedKalmanFilter(dim_x=6, dim_z=4, fx=F_6, hx=Hx_6_dist,
                                                    dt=dt, points=points)
         kf.x = np.array([1, 0, 1, 0, 1, 0])
-
-        # set cov of vel
-        kf.P[1][1] = 0.1
-        kf.P[3][3] = 0.1
-        kf.P[5][5] = 0.1
 
         self.kf = kf
         self.dt = dt
