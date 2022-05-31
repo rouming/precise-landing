@@ -565,7 +565,10 @@ if __name__ == '__main__':
     if args['--noise-std']:
         noise_std = float(args['--noise-std'])
 
-    if args['--kf-type'] == 'ukf6':
+    if not args['--kf-type']:
+        # Default kalman type
+        kf_type = kalman_type.UKF6
+    elif args['--kf-type'] == 'ukf6':
         kf_type = kalman_type.UKF6
     elif args['--kf-type'] == 'ekf6':
         kf_type = kalman_type.EKF6
@@ -574,7 +577,8 @@ if __name__ == '__main__':
     elif args['--kf-type'] == 'ekf9':
         kf_type = kalman_type.EKF9
     else:
-        kf_type = kalman_type.UKF6
+        print("Error: incorrect kalman filter type: '%s'" % args['--kf-type'])
+        sys.exit(-1)
 
     droneloc = drone_localization(kf_type, dt, post_smoother=post_smoother)
 
