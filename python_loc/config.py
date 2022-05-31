@@ -22,16 +22,17 @@ UDP_COMMANDS_PORT = 5557
 UDP_PLOT_IP = '127.0.0.1'
 UDP_PLOT_PORT = 5558
 
-# Landing point in meters, middle of the landing platform
-LANDING_X = 1.30 / 2
-LANDING_Y = 1.30 / 2
-# Drone coords are in ENU, this is the angle in radians of how
-# the landing area is oriented, the rotation clockwise
-LANDING_ANGLE = 0
-
 TESTING_STAND = 2
 
 if TESTING_STAND == 1:
+    # Landing point in meters, middle of the landing platform
+    LANDING_X = 0.60 / 2
+    LANDING_Y = 0.60 / 2
+
+    # Drone coords are in ENU, this is the angle in radians of how
+    # the landing area is oriented, the rotation clockwise
+    LANDING_ANGLE = 0
+
     # Anchors coords (should create a rectangle with clockwise coords)
     ANCHORS = {
         0x2585: [0.60, 0.60, 0.00],
@@ -47,6 +48,14 @@ if TESTING_STAND == 1:
     NANO33_MAC = "ed:26:b0:24:73:0c"
 
 elif TESTING_STAND == 2:
+    # Landing point in meters, middle of the landing platform
+    LANDING_X = 1.30 / 2
+    LANDING_Y = 1.30 / 2
+
+    # Drone coords are in ENU, this is the angle in radians of how
+    # the landing area is oriented, the rotation clockwise
+    LANDING_ANGLE = 0
+
     # Anchors coords (should create a rectangle with clockwise coords)
     ANCHORS = {
         # Network 0xaaac
