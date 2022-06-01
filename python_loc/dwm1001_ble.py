@@ -360,7 +360,7 @@ from docopt import docopt
 import select
 
 should_stop = False
-efd = eventfd.EventFD()
+stop_efd = eventfd.EventFD()
 
 def coords_to_mm(pos):
     pos['coords'] = [int(v * 1000) for v in pos['coords']]
@@ -373,9 +373,9 @@ def coords_and_dist_to_mm(loc):
 
 def signal_handler(sig, frame):
     print(' You pressed Ctrl+C! Disconnecting all devices ...')
-    global should_stop, efd
+    global should_stop, stop_efd
     should_stop = True
-    efd.set()
+    stop_efd.set()
 
 if __name__ == '__main__':
     args = docopt(help)
@@ -397,7 +397,7 @@ if __name__ == '__main__':
     efds = eventfd_map.values()
 
     while not should_stop:
-        r, w, e = select.select(efds, [], [])
+        r, w, e = select.select([*efds, stop_efd], [], [])
         if should_stop:
             break
 
