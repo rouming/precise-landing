@@ -362,6 +362,7 @@ def destroy_dwm_fds():
 def create_parrot_sock():
     # Create parrot sock
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     sock.bind((cfg.UDP_TELEMETRY_IP, cfg.UDP_TELEMETRY_PORT))
     sock.setblocking(0)
 
