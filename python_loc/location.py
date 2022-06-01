@@ -306,7 +306,7 @@ def create_dwm_sock():
     sock.bind((cfg.MCAST_GRP, cfg.MCAST_PORT))
 
     # Join group
-    mreq = struct.pack("4sl", socket.inet_aton(cfg.MCAST_GRP), socket.INADDR_ANY)
+    mreq = (socket.inet_aton(cfg.MCAST_GRP) + socket.inet_aton("127.0.0.1"))
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
     sock.setblocking(0)
 

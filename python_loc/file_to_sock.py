@@ -59,6 +59,9 @@ def send_parrot_data(parrot_sock, line):
 def create_dwm_sock():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
     sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, MULTICAST_TTL)
+    sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF,
+                    socket.inet_aton("127.0.0.1"))
+
     return sock
 
 def send_dwm_data(dwm_sock, loc):
