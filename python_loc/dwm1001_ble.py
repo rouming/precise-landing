@@ -348,10 +348,11 @@ help = \
 """DWM1001 BLE
 
 Usage:
-  dwm1001_ble.py --tag-addr <addr>... [--stream-to-sock]
+  dwm1001_ble.py [--hci-dev <dev>] --tag-addr <addr>... [--stream-to-sock]
 
 Options:
   -h --help              Show this screen
+  --hci-dev <dev>        Bluetooth device, 'hci0' by default
   --tag-addr <addr>...   Tag node address in hex
   --stream-to-sock       Stream DWM location to sock
 """
@@ -385,8 +386,12 @@ if __name__ == '__main__':
     tag = None
     ts = time.time()
 
+    hci_dev = 'hci0'
+    if args['--hci-dev']:
+        hci_dev = args['--hci-dev']
+
     eventfd_map = {addr: eventfd.EventFD() for addr in tag_addrs}
-    manager = DWMDeviceManager(adapter_name='hci0',
+    manager = DWMDeviceManager(adapter_name=hci_dev,
                                predefined_anchors=cfg.ANCHORS,
                                eventfd_map=eventfd_map)
     manager.start()
