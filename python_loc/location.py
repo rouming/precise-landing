@@ -408,12 +408,12 @@ def send_plot_data(sock, x, y, z, parrot_alt, ts, rate, navigator, loc):
 
 def receive_dwm_location_from_sock(sock):
     # Location header
-    fmt = "iiihhiii"
+    fmt = "iiihhfi"
     sz = struct.calcsize(fmt)
     buf = sock.recv(sz, socket.MSG_PEEK)
 
     # Unpack location header
-    (x, y, z, pos_qf, pos_valid, ts_sec, ts_usec, nr_anchors) = struct.unpack(fmt, buf)
+    (x, y, z, pos_qf, pos_valid, ts, nr_anchors) = struct.unpack(fmt, buf)
 
     location = {
         'pos': {
@@ -423,7 +423,7 @@ def receive_dwm_location_from_sock(sock):
             'qf': pos_qf,
             'valid': pos_valid,
         },
-        'ts': float("%ld.%06ld" % (ts_sec, ts_usec)),
+        'ts': ts,
         'anchors': [],
     }
 
@@ -478,10 +478,10 @@ def receive_nano33_data():
 
 def receive_parrot_data_from_sock(sock):
     # Header
-    fmt = "iii"
+    fmt = "if"
     sz = struct.calcsize(fmt)
     buf = sock.recv(sz, socket.MSG_PEEK)
-    event, sec, usec = struct.unpack(fmt, buf)
+    event, ts = struct.unpack(fmt, buf)
 
     event_type = parrot_event_type(event)
 
@@ -489,7 +489,7 @@ def receive_parrot_data_from_sock(sock):
         fmt += "f"
         sz = struct.calcsize(fmt)
         buf = sock.recv(sz)
-        _, _, _, alt  = struct.unpack(fmt, buf)
+        _, _, alt  = struct.unpack(fmt, buf)
         if alt == 0.0:
             return None
         parrot_data = {'alt': alt}
@@ -497,7 +497,7 @@ def receive_parrot_data_from_sock(sock):
         fmt += "fff"
         sz = struct.calcsize(fmt)
         buf = sock.recv(sz)
-        _, _, _, *vel  = struct.unpack(fmt, buf)
+        _, _, *vel  = struct.unpack(fmt, buf)
         vel = np.array(vel)
         if np.all(vel == 0.0):
             return None
@@ -512,20 +512,20 @@ def receive_parrot_data_from_sock(sock):
         fmt += "fff"
         sz = struct.calcsize(fmt)
         buf = sock.recv(sz)
-        _, _, _, lat, lon, alt  = struct.unpack(fmt, buf)
+        _, _, lat, lon, alt  = struct.unpack(fmt, buf)
         # TODO
         return None
     elif event_type == parrot_event_type.ATTITUDE:
         fmt += "fff"
         sz = struct.calcsize(fmt)
         buf = sock.recv(sz)
-        _, _, _, roll, pitch, yaw  = struct.unpack(fmt, buf)
+        _, _, roll, pitch, yaw  = struct.unpack(fmt, buf)
         parrot_data = {'att': [roll, pitch, yaw]}
     else:
         assert(0)
         return None
 
-    parrot_data['ts'] = float("%ld.%06ld" % (sec, usec))
+    parrot_data['ts'] = ts
 
     return parrot_data
 

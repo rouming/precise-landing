@@ -148,13 +148,8 @@ class FlightListener(olympe.EventListener):
         super().__init__(drone)
 
     def send_parrot_telemetry(self, event_type, fmt, data):
-        ns = time.time_ns()
-        usec = ns / 1000
-        sec = usec / 1000000
-        usec %= 1000000
-
-        buf = struct.pack("iii" + fmt, int(event_type.value),
-                          int(sec), int(usec), *data)
+        ts = time.time()
+        buf = struct.pack("if" + fmt, int(event_type.value), ts, *data)
         self._sock.sendto(buf, (UDP_TELEMETRY_IP, UDP_TELEMETRY_PORT))
 
     @olympe.listen_event(FlyingStateChanged() | AlertStateChanged() | NavigateHomeStateChanged())

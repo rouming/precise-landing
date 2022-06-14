@@ -41,19 +41,15 @@ def create_parrot_sock():
 
 def send_parrot_data(parrot_sock, line):
     fields = line[line.find("alt") : -1].split(" ")
-    fmt = "iiffff"
+    fmt = "fffff"
 
     alt = float(fields[1])
     roll = float(fields[3])
     pitch = float(fields[5])
     yaw = float(fields[7])
 
-    ts_s , ts_us = str(last_ts).split(".")
-    ts_s = int(ts_s)
-    ts_us = int(ts_us)
-
     buff = ctypes.create_string_buffer(512)
-    struct.pack_into(fmt, buff, 0, ts_s, ts_us, alt, roll, pitch, yaw)
+    struct.pack_into(fmt, buff, 0, last_ts, alt, roll, pitch, yaw)
     parrot_sock.sendto(buff, (PARROT_IP, PARROT_PORT))
 
 def create_dwm_sock():
@@ -67,19 +63,15 @@ def create_dwm_sock():
 def send_dwm_data(dwm_sock, loc):
     nr_anchors = len(loc['anchors'])
 
-    fmt = "iiihhiii"
+    fmt = "iiihhfi"
     buff = ctypes.create_string_buffer(512)
 
     pos = loc['pos']
 
-    ts_s , ts_us = str(loc['ts']).split(".")
-    ts_s = int(ts_s)
-    ts_us = int(ts_us)
-
-    # (x, y, z, pos_qf, pos_valid, ts_sec, ts_usec, nr_anchors)
+    # (x, y, z, pos_qf, pos_valid, ts, nr_anchors)
     struct.pack_into(fmt, buff, 0,
                      *pos['coords'], pos['qf'], pos['valid'],
-                     ts_s, ts_us, nr_anchors)
+                     loc['ts'], nr_anchors)
     off = struct.calcsize(fmt)
 
     for anchor in loc['anchors']:
