@@ -34,6 +34,7 @@ from scipy.signal import savgol_filter
 import filterpy.kalman
 import sys
 import enum
+import time
 
 class smoother_type(enum.Enum):
     SAVGOL   = 0
@@ -336,12 +337,24 @@ class drone_localization():
     def get_dt(self, loc):
         dt = 0.1
         if self.dt is None:
+            #XXX
+            #XXX 'ts' for dwm and parrot can be swapped in
+            #XXX receive loop, so that dt goes negative.
+            #XXX Temporal solution set current local time
+            #XXX for each package
+            #XXX
+            loc['ts'] = time.time()
             if self.process_ts is not None:
-                dt = loc["ts"] - self.process_ts
-            self.process_ts = loc["ts"]
+                dt = loc['ts'] - self.process_ts
+            self.process_ts = loc['ts']
         else:
             dt = self.dt
 
+        if dt > 1:
+            print("Warning: huge dt=%d" % dt)
+            dt = 0.1
+
+        assert(dt > 0)
         return dt
 
 
