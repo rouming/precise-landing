@@ -58,26 +58,22 @@ elif TESTING_STAND == 2:
 
     # Anchors coords (should create a rectangle with clockwise coords)
     ANCHORS = {
-        # Network 0xaaac
-        # Tag 0x16e9
+        # Network 0xdeca, tag 0x16fc
         0x14d5: [0.000, 0.000, 0.000],
         0x0465: [1.300, 0.000, 0.000],
         0x14c8: [1.300, 1.300, 0.000],
         0x14ca: [0.000, 1.300, 0.000],
 
-        # Network 0xa53e
-        # Tag 0x16fc
         0x11cf: [0.650, 0.000, 0.000],
         0x1337: [1.300, 0.650, 0.000],
         0x14c6: [0.650, 1.300, 0.000],
-        0x14d9: [0.000, 0.650, 0.000],
+        0x14d9: [0.000, 0.650, 0.000], # master node
     }
 
     #
     # Tags
     #
-    #TAG_ADDRS = [0x16e9, 0x16fc]
-    TAG_ADDRS = [0x16e9]
+    TAG_ADDRS = [0x16fc]
 
     #
     # Nano33BLE
