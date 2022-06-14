@@ -91,8 +91,8 @@ class parrot_event_type(enum.Enum):
 pid_components = namedtuple('pid_components', 'Kp Ki Kd')
 
 # Default PID config
-xy_pid_comp  = pid_components(Kp=50,  Ki=0, Kd=100)
-yaw_pid_comp = pid_components(Kp=120, Ki=0, Kd=40)
+xy_pid_comp  = pid_components(Kp=30,  Ki=0, Kd=70)
+yaw_pid_comp = pid_components(Kp=120, Ki=0, Kd=60)
 pid_limits   = (-100, 100)
 
 DWM_DATA_SOURCE = dwm_source.BLE
