@@ -53,8 +53,10 @@ stop_efd    = eventfd.EventFD()
 
 MAX_PID_RATE_HZ       = 10
 MAX_PID_DT            = 1
+DESCENDING_ALT        = 1
 LANDING_ALT           = 0.5
 LANDING_SETTLING_SECS = 1
+ALT_LANDING_ERROR     = 0.01
 YAW_LANDING_ERROR     = 0.01
 YAW_OUTDATED_SECS     = 1
 
@@ -219,29 +221,45 @@ class drone_navigator(threading.Thread):
         control_y = self.y_pid(drone_pos[1])
 
         # Calculate XY error
-        xy_error = np.abs(drone_pos[:2] - np.zeros(2))
+        xy_error = np.abs(drone_pos[:2])
         xy_ready = np.all(xy_error < XY_LANDING_ERROR(altitude))
 
         # Calculate yaw error
         yaw_error = np.abs(normalize_angle(yaw_angle))
         yaw_ready = np.all(yaw_error < YAW_LANDING_ERROR)
 
-        # Make a decision if we descend or initiate landing
-        if xy_ready and yaw_ready:
+        if altitude >= DESCENDING_ALT and xy_ready:
+            # Descend continously if far from the earth
+            control_thr = descend_control_rate(altitude)
+            self.ready_to_land_ts = None
+            self.prev_altitude = None
+        elif xy_ready and yaw_ready:
+            # Descend iteratively if very close to the earth
             if self.ready_to_land_ts is None:
                 self.ready_to_land_ts = now
             elif now - self.ready_to_land_ts >= LANDING_SETTLING_SECS:
                 if altitude <= LANDING_ALT:
-                    # Initiate landing. Clumsy, but no extra landing
-                    # command is needed
-                    control_thr = -128
+                    if self.prev_altitude is not None:
+                        # Land when anafi rejects descending
+                        # TODO: we should not depend on anafi
+                        if np.abs(self.prev_altitude - altitude) < ALT_LANDING_ERROR:
+                            # Initiate landing. Clumsy, but no extra landing
+                            # command is needed
+                            control_thr = -128
+
+                    self.prev_altitude = altitude
+
                 else:
+                    self.prev_altitude = None
+
+                if control_thr == 0:
                     control_thr = descend_control_rate(altitude)
 
                 # Settle once again on the next descend iteration
                 self.ready_to_land_ts = None
         else:
             self.ready_to_land_ts = None
+            self.prev_altitude = None
 
         print("PID CONTROL X=%4d Y=%4d YAW=%4d, DP=(%.2f %.2f %.2f) YAW=(%.1f°) %s" %
               (int(control_x), int(control_y), int(control_yaw),
