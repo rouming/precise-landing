@@ -1,3 +1,16 @@
+#!/usr/bin/env python3
+
+"""Parrot Olympe keyboard control
+
+Usage:
+  olympe-keyboard.py [--no-block-input-on-land]
+
+Options:
+  -h --help                    Show this screen
+  --no-block-input-on-land   Optional param needed for the full autonomous flight in a loop
+"""
+
+from docopt import docopt
 import time
 import socket
 import struct
@@ -85,6 +98,15 @@ class event_type(Enum):
     ATTITUDE = 1
     VELOCITY = 2
     POSITION = 3
+    STATE    = 4
+
+class drone_state(Enum):
+    LANDED    = 0
+    TAKINGOFF = 1
+    FLYING    = 2
+    LANDING   = 3
+
+STATE_EVENT_RATE_HZ = 10
 
 UDP_TELEMETRY_IP = '127.0.0.1'
 UDP_TELEMETRY_PORT = 5556
@@ -141,6 +163,9 @@ def drone_stop_recording(drone):
     drone(stop_recording(cam_id=0))
 
 class FlightListener(olympe.EventListener):
+    state = drone_state.LANDED
+    state_ts = None
+
     def __init__(self, drone):
         # Create telemetry sock
         self._sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -152,8 +177,31 @@ class FlightListener(olympe.EventListener):
         buf = struct.pack("if" + fmt, int(event_type.value), ts, *data)
         self._sock.sendto(buf, (UDP_TELEMETRY_IP, UDP_TELEMETRY_PORT))
 
+    @olympe.listen_event(queue_size=100)
+    def onAnyEvent(self, event, scheduler):
+        if self.state_ts is not None and \
+           time.time() - self.state_ts > 1 / STATE_EVENT_RATE_HZ:
+            # Send state event with some rate
+            self.send_parrot_telemetry(event_type.STATE, "i", (self.state.value,))
+            self.state_ts = time.time()
+
     @olympe.listen_event(FlyingStateChanged() | AlertStateChanged() | NavigateHomeStateChanged())
     def onStateChanged(self, event, scheduler):
+        if event.message.name == 'FlyingStateChanged':
+            state = str(event.args["state"])
+            if state == 'FlyingStateChanged_State.landed':
+                self.state = drone_state.LANDED
+            elif state == 'FlyingStateChanged_State.takingoff':
+                self.state = drone_state.TAKINGOFF
+            elif state == 'FlyingStateChanged_State.hovering' or \
+                 state == 'FlyingStateChanged_State.flying':
+                self.state = drone_state.FLYING
+            elif event.args["state"] == 'FlyingStateChanged_State.landing':
+                self.state = drone_state.LANDING
+
+            self.send_parrot_telemetry(event_type.STATE, "i", (self.state.value,))
+            self.state_ts = time.time()
+
         print("{} = {}".format(event.message.name, event.args["state"]))
 
     @olympe.listen_event(PositionChanged())
@@ -367,6 +415,8 @@ class SockCtrl():
 
 
 if __name__ == "__main__":
+    args = docopt(__doc__)
+
     # Reduce log level
     olympe.log.update_config({"loggers": {"olympe": {"level": "WARNING"}}})
 
@@ -398,7 +448,7 @@ if __name__ == "__main__":
             elif sock_ctrl.has_piloting_cmd() and not other_input_blocked:
                 cmd = sock_ctrl.get_piloting_cmd()
                 drone(cmd)
-                if is_drone_cmd_land(cmd):
+                if is_drone_cmd_land(cmd) and not args['--no-block-input-on-land']:
                     # Block other input after landing
                     kb_ctrl.block_other_input()
             elif other_input_blocked:
