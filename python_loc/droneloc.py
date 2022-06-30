@@ -62,7 +62,7 @@ ALT_GATE_LIMIT = 20
 
 R_scale = 1
 Q_scale = 1
-z_damping_factor = 0.5
+z_damping_factor = 2
 
 dt = 0.2
 hist_window = 25
