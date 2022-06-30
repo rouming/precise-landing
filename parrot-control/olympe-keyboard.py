@@ -396,9 +396,12 @@ class SockCtrl():
         off = 0
         while off < len(buf):
             (roll, pitch, yaw, throttle) = struct.unpack_from(fmt, buf, off)
-            # Looks clumsy, but does not introduce land commands
+            # Looks clumsy, but does not introduce extra commands
             if throttle == -128:
                 self._cmds.append(drone_cmd_land())
+                throttle = 0
+            elif throttle == 127:
+                self._cmds.append(drone_cmd_takeoff())
                 throttle = 0
             self._cmds.append(drone_cmd_pcmd(roll, pitch, yaw, throttle))
             off += sz;
