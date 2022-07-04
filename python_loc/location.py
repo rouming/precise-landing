@@ -3,11 +3,12 @@
 """Localization script with all the math
 
 Usage:
-  location.py --data-source <source> --mission <list> [--loop]
+  location.py --data-source <source> --mission <list> [--loop] [--output <file>]
 
 Options:
   -h --help                  Show this screen
   --data-source <source>     Should be 'ble' or 'sock'
+  --output <file>            Write estimated 3D position to the output file
   --mission <list>           List of mission actions, e.g. "pos=x,y,z", "heading=x,y", "takeoff", "land"
   --loop                     Repeat mission in a loop
 
@@ -924,6 +925,10 @@ if __name__ == '__main__':
     if not res:
         sys.exit(-1)
 
+    out = None
+    if args['--output']:
+        out = open(args['--output'], 'w+')
+
     navigator = drone_navigator(actions)
     plot_sock = create_plot_sock()
 
@@ -968,6 +973,11 @@ if __name__ == '__main__':
 
         # Invoke distance localization
         x, y, z = droneloc.kf_process_dist(loc)
+
+        # Write estimated position to the file
+        if out:
+            out.write("%.3f\t%.3f\t%.3f\n" % (x, y, z))
+            out.flush()
 
         # Set estimated position
         navigator.set_pos(x, y, z)
