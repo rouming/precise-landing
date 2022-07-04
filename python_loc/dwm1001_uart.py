@@ -49,6 +49,11 @@ def to_loc(obj):
         coords = [0, 0, 0]
         valid = 0
 
+        if 'uid' not in rng or \
+           'rng' not in rng:
+            # Invalid range
+            continue
+
         addr = rng['uid']
         rng = rng['rng']
 
