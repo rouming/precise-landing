@@ -36,6 +36,7 @@ def coords_to_mm(coords):
 
 def to_loc(obj):
     loc = {
+        'addr': obj['uid'],
         'pos': {
             'coords': [0, 0, 0],
             'qf': 0,
@@ -96,7 +97,9 @@ if __name__ == '__main__':
         try:
             line = ser.readline()
             obj = json.loads(line)
-            if 'rngs' not in obj:
+            if 'uid' not in obj or \
+               'rngs' not in obj:
+                # Invalid json
                 continue
         except:
             continue
@@ -105,7 +108,7 @@ if __name__ == '__main__':
         if args['--stream-to-sock']:
             send_dwm_data(dwm_sock, loc)
 
-        print("%.06f " % loc['ts'], end='')
+        print("ts=%.06f tag=0x%x " % (loc['ts'], loc['addr']), end='')
         for a in loc['anchors']:
             print("[0x%x: %.3fm] " % (a['addr'], int(a['dist']['dist']) / 1000.0),
                   end='')
