@@ -1,0 +1,3 @@
+[submodule "firmware/uwb-apps"]
+	path = firmware/uwb-apps
+	url = https://github.com/rouming/uwb-apps.git
