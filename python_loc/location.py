@@ -13,7 +13,7 @@ Options:
   --loop                     Repeat mission in a loop
 
 Example:
-  location.py --data-source sock --mission takeoff,heading=1300,1300,pos=1300,1300,1500,heading=100,1300,pos=100,1300,600,heading=650,650,land --loop
+  location.py --data-source sock --mission takeoff,heading=1300,1300,pos=1300,1300,1500,heading=100,1300,pos=100,1300,600,heading=650,650,land=650,650 --loop
 """
 
 from docopt import docopt
@@ -152,7 +152,7 @@ def rotation_angle_between(v1, v2):
 
 class action_type(enum.Enum):
     TAKEOFF = r'takeoff'
-    LAND    = r'land'
+    LAND    = r'land=(-?\d+,-?\d+)'
     POS     = r'pos=(-?\d+,-?\d+,-?\d+)'
     HEADING = r'heading=(-?\d+,-?\d+)'
 
@@ -179,13 +179,18 @@ class action_parser():
             if re.fullmatch(action_type.TAKEOFF.value, a[0]):
                 self.actions.append({'type': action_type.TAKEOFF})
             elif re.fullmatch(action_type.LAND.value, a[0]):
-                self.actions.append({'type': action_type.LAND})
+                land = np.array(a[1].split(","), dtype=float)
+                assert(len(land) == 2)
+                # Extend to 3D by setting Z to 0
+                land = np.append(land, 0)
+                land /= 1000.0 # to meters
+                self.actions.append({'type': action_type.LAND, 'land': land})
             elif re.fullmatch(action_type.POS.value, a[0]):
-                pos = np.array(a[1].split(","), dtype=float)
+                pos = np.array(a[2].split(","), dtype=float)
                 pos /= 1000.0 # to meters
                 self.actions.append({'type': action_type.POS, 'pos': pos})
             elif re.fullmatch(action_type.HEADING.value, a[0]):
-                heading = np.array(a[2].split(","), dtype=float)
+                heading = np.array(a[3].split(","), dtype=float)
                 assert(len(heading) == 2)
                 # Extend to 3D by setting Z to 0
                 heading = np.append(heading, 0)
@@ -478,7 +483,7 @@ class drone_navigator(threading.Thread):
         elif action_type == action_type.LAND:
             if self.state == drone_state.FLYING:
                 # Landing position
-                target_pos = [cfg.LANDING_X, cfg.LANDING_Y, 0]
+                target_pos = action['land']
                 # Land North oriented
                 target_yaw = 0
 
