@@ -6,7 +6,7 @@ Usage:
   olympe-keyboard.py [--no-block-input-on-land]
 
 Options:
-  -h --help                    Show this screen
+  -h --help                  Show this screen
   --no-block-input-on-land   Optional param needed for the full autonomous flight in a loop
 """
 
