@@ -35,7 +35,7 @@
 /* For the bluetooth funcionality */
 #include <ArduinoBLE.h>
 
-// #define USE_SERIAL
+#define USE_SERIAL
 
 struct data
 {
@@ -139,11 +139,13 @@ void setup()
             delay(100);
      }
 
+#if 0
 #ifdef USE_SERIAL
      Serial.begin(115200);
      while (!Serial); //wait for connection
      Serial.println();
      Serial.println("LSM9DS1 AHRS starting");
+#endif
 #endif
 
      Wire1.begin();
@@ -175,10 +177,12 @@ void setup()
         BLE.addService(BLESensors);
         BLE.advertise();
 
+#if 0
 #ifdef USE_SERIAL
         String address = BLE.address();
         Serial.print("Local MAC address is: ");
         Serial.println(address);
+#endif
 #endif
     }
 
@@ -187,15 +191,16 @@ void setup()
 void loop()
 {
   static char updated = 0; //flags for sensor updates
-  static int loop_counter=0; //sample & update loop counter
   static float Gxyz[3], Axyz[3], Mxyz[3]; //centered and scaled gyro/accel/mag data
 
   BLEDevice central = BLE.central();
 
+#if 0
   if (!central)
 	  return;
   if (!central.connected())
 	  return;
+#endif
 
   // Update the sensor values whenever new data is available
   if ( imu.accelAvailable() ) {
@@ -213,7 +218,6 @@ void loop()
   if (updated == 7) //all sensors updated?
   {
     updated = 0; //reset update flags
-    loop_counter++;
     get_scaled_IMU(Gxyz, Axyz, Mxyz);
 
     // correct accel/gyro handedness
@@ -275,15 +279,25 @@ void loop()
     roll /= 180.0 / PI;
 
 #ifdef USE_SERIAL
-    Serial.print("ypr ");
-    Serial.print(yaw, 0);
+#if 0
+    Serial.print("q, ");
+    Serial.print(q[0], 3);
     Serial.print(", ");
-    Serial.print(pitch, 0);
+    Serial.print(q[1], 3);
     Serial.print(", ");
-    Serial.print(roll, 0);
-//    Serial.print(", ");  //prints 24 in 300 ms (80 Hz) with 16 MHz ATmega328
-//    Serial.print(loop_counter);  //sample & update loops per print interval
-    loop_counter = 0;
+    Serial.print(q[2], 3);
+    Serial.print(", ");
+    Serial.print(q[3], 3);
+    Serial.print(", ");
+    Serial.print(q[0], 3);
+    Serial.print(", ");
+#endif
+    Serial.print("ypr, ");
+    Serial.print(yaw, 3);
+    Serial.print(", ");
+    Serial.print(pitch, 3);
+    Serial.print(", ");
+    Serial.print(roll, 3);
     Serial.print(", ");
 #endif
 
@@ -300,12 +314,12 @@ void loop()
     acc_z -= 1;
 
 #ifdef USE_SERIAL
-    Serial.print("acc ");
-    Serial.print(acc_x, 2);
+    Serial.print("acc, ");
+    Serial.print(acc_x, 3);
     Serial.print(", ");
-    Serial.print(acc_y, 2);
+    Serial.print(acc_y, 3);
     Serial.print(", ");
-    Serial.print(acc_z, 2);
+    Serial.print(acc_z, 3);
     Serial.println();
 #endif
 
@@ -335,8 +349,6 @@ void vector_normalize(float a[3])
   a[1] /= mag;
   a[2] /= mag;
 }
-
-
 
 
 static float rMat[3][3];
@@ -370,7 +382,6 @@ static void imuComputeRotationMatrix(void)
 
 }
 
-
 static void imuTransformVectorBodyToEarth(float &ax, float &ay, float &az)
 {
     /* From body frame to earth frame */
@@ -382,8 +393,6 @@ static void imuTransformVectorBodyToEarth(float &ax, float &ay, float &az)
     ay = y;
     az = z;
 }
-
-
 
 // function to subtract offsets and apply scale/correction matrices to IMU data
 
